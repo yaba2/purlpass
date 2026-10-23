@@ -101,7 +101,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       </section>
 
       {/* Rest of the content with container */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16 pb-20">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16 pb-20 pt-12">
 
       {/* 2. FEATURED HEADLINER SHOWS */}
       {featuredEvents.length > 0 && (
