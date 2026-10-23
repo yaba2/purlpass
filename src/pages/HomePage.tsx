@@ -1,16 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Search,
   MapPin,
   Sparkles,
   ArrowRight,
   ShieldCheck,
   Zap,
   Flame,
-  Music,
-  Laptop,
-  Drama,
-  Trophy,
 } from 'lucide-react';
 import { EventCard, EventItem } from '../components/EventCard.tsx';
 
@@ -26,32 +21,15 @@ export const HomePage: React.FC<HomePageProps> = ({
   onQuickBook,
 }) => {
   const [events, setEvents] = useState<EventItem[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCity, setSelectedCity] = useState('');
-
-  const categoryIcons: Record<string, any> = {
-    'music-concerts': Music,
-    festivals: Sparkles,
-    'tech-conferences': Laptop,
-    'arts-theatre': Drama,
-    nightlife: Flame,
-    'sports-gaming': Trophy,
-  };
 
   useEffect(() => {
     async function loadData() {
       try {
         setLoading(true);
-        const [evRes, catRes] = await Promise.all([
-          fetch('/api/events?limit=12'),
-          fetch('/api/categories'),
-        ]);
+        const evRes = await fetch('/api/events?limit=12');
         const evData = await evRes.json();
-        const catData = await catRes.json();
         setEvents(evData.events || []);
-        setCategories(catData || []);
       } catch (err) {
         console.error('Failed to load homepage data:', err);
       } finally {
@@ -64,11 +42,6 @@ export const HomePage: React.FC<HomePageProps> = ({
   const featuredEvents = events.filter((e) => e.isFeatured);
   const upcomingEvents = events.slice(0, 6);
 
-  const handleHeroSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    onExploreAll({ query: searchQuery });
-  };
-
   return (
     <>
       {/* 1. HERO SECTION (FULL WIDTH WITH BACKGROUND IMAGE) */}
@@ -76,7 +49,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         {/* Background Image */}
         <div className="absolute inset-0">
           <img
-            src="https://images.unsplash.com/photo-1590736969955-71cc94801759?w=1920&h=1080&fit=crop"
+            src="https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=1920&h=1080&fit=crop&q=80"
             alt="Concert Event"
             className="w-full h-full object-cover"
           />
@@ -130,53 +103,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       {/* Rest of the content with container */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16 pb-20">
 
-      {/* 2. POPULAR CATEGORIES */}
-      <section className="space-y-8">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl sm:text-4xl font-black text-stone-900 tracking-tight">
-              Explore By Category
-            </h2>
-            <p className="text-base text-stone-600 mt-2 font-medium">
-              Find your next favorite show across genres and spectacles.
-            </p>
-          </div>
-          <button
-            onClick={() => onExploreAll()}
-            className="text-base font-bold text-[#8A5120] hover:text-[#6E3D12] flex items-center gap-2 transition-colors"
-          >
-            <span>All Categories</span>
-            <ArrowRight className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-          {categories.map((cat) => {
-            const Icon = categoryIcons[cat.slug] || Sparkles;
-            return (
-              <button
-                key={cat.id}
-                onClick={() => onExploreAll({ category: cat.slug })}
-                className="group p-5 rounded-2xl bg-white border border-[#EADBCA] hover:border-[#C2824A] hover:bg-[#FAF4EB] text-left transition-all duration-200 flex flex-col justify-between h-36 shadow-sm hover:shadow-md"
-              >
-                <div className="w-12 h-12 rounded-xl bg-[#FAF6EE] border border-[#E5DAC8] group-hover:border-[#C2824A] group-hover:bg-[#EEDEC8] flex items-center justify-center text-[#8A5120] transition-colors">
-                  <Icon className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-base text-stone-900 group-hover:text-[#8A5120] transition-colors line-clamp-1">
-                    {cat.name}
-                  </h4>
-                  <span className="text-sm text-stone-500 font-mono block mt-1 font-medium">
-                    Browse →
-                  </span>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* 3. FEATURED HEADLINER SHOWS */}
+      {/* 2. FEATURED HEADLINER SHOWS */}
       {featuredEvents.length > 0 && (
         <section className="space-y-8">
           <div className="flex items-center justify-between">
@@ -204,7 +131,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         </section>
       )}
 
-      {/* 4. UPCOMING SHOWS & LIVE GIGS */}
+      {/* 3. UPCOMING SHOWS & LIVE GIGS */}
       <section className="space-y-8">
         <div className="flex items-center justify-between">
           <div>
@@ -247,7 +174,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         )}
       </section>
 
-      {/* 5. PLATFORM VALUE BANNER (WHEAT THEMED) */}
+      {/* 4. PLATFORM VALUE BANNER (WHEAT THEMED) */}
       <section className="rounded-3xl bg-[#F4EDE2] border border-[#DFCDB7] p-10 lg:p-16 shadow-md">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-10 text-center md:text-left">
           <div className="space-y-3">
