@@ -1,0 +1,20 @@
+services:
+  # Type: Web Service
+  - type: web
+    name: pulsepass
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      # Add these in Render dashboard:
+      # - key: DATABASE_URL
+      #   sync: false
+      # - key: APP_URL
+      #   sync: false
+      # - key: GEMINI_API_KEY
+      #   sync: false
