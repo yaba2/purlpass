@@ -11,10 +11,9 @@ services:
         value: production
       - key: PORT
         value: 10000
-      # Add these in Render dashboard:
-      # - key: DATABASE_URL
-      #   sync: false
-      # - key: APP_URL
-      #   sync: false
-      # - key: GEMINI_API_KEY
-      #   sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
