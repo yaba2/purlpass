@@ -39,7 +39,7 @@ const DEMO_USERS: Record<'customer' | 'organizer' | 'staff' | 'admin', UserProfi
     id: 1,
     uid: 'demo-admin-uid',
     email: 'admin@pulsepass.events',
-    displayName: 'Alex Rivera (Platform Admin)',
+    displayName: 'Brian Zach (Platform Admin)',
     role: 'admin',
     avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
     isActive: true,

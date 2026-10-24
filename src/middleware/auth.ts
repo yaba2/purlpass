@@ -30,7 +30,7 @@ export const requireAuth = async (
     if (roleKey === 'admin') {
       uid = 'demo-admin-uid';
       email = 'admin@pulsepass.events';
-      displayName = 'Alex Rivera (Platform Admin)';
+      displayName = 'Brian Zach (Platform Admin)';
       role = 'admin';
     } else if (roleKey === 'organizer') {
       uid = 'demo-organizer-uid';

@@ -80,7 +80,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab }) => 
             </div>
             <div>
               <span className="font-extrabold text-2xl tracking-tight text-stone-900 flex items-center gap-1.5">
-                Pulse<span className="text-[#9B5E28]">Pass</span>
+                Punch,Munch<span className="text-[#9B5E28]">$Crunch</span>
               </span>
               <span className="text-xs text-stone-500 font-mono tracking-wider block -mt-1 uppercase font-semibold">
                 Ticketing Platform

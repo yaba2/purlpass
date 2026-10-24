@@ -6,6 +6,9 @@ import {
   ShieldCheck,
   Zap,
   Flame,
+  Phone,
+  Mail,
+  Trophy,
 } from 'lucide-react';
 import { EventCard, EventItem } from '../components/EventCard.tsx';
 
@@ -205,6 +208,61 @@ export const HomePage: React.FC<HomePageProps> = ({
             <p className="text-base text-stone-600 leading-relaxed font-medium">
               Authorized check-in staff validate tickets in milliseconds using device cameras, recording attendance timestamps directly to Cloud SQL.
             </p>
+          </div>
+        </div>
+      </section>
+
+      {/* 5. SPONSORS SECTION */}
+      <section className="space-y-8">
+        <div className="text-center">
+          <h2 className="text-3xl sm:text-4xl font-black text-stone-900 tracking-tight">
+            Our Sponsors
+          </h2>
+          <p className="text-base text-stone-600 mt-2 font-medium">
+            Proudly supported by leading brands
+          </p>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+          {['Safari Beer', 'Equity Bank', 'Safaricom', 'Coca-Cola'].map((sponsor, idx) => (
+            <div
+              key={idx}
+              className="p-6 rounded-2xl bg-white border border-[#EADBCA] hover:border-[#C2824A] hover:shadow-md transition-all text-center"
+            >
+              <Trophy className="w-8 h-8 text-[#9B5E28] mx-auto mb-3" />
+              <span className="font-bold text-stone-900">{sponsor}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* 6. CONTACT INFORMATION */}
+      <section className="rounded-3xl bg-[#F4EDE2] border border-[#DFCDB7] p-10 lg:p-16 shadow-md">
+        <div className="text-center mb-8">
+          <h2 className="text-3xl sm:text-4xl font-black text-stone-900 tracking-tight">
+            Contact Us
+          </h2>
+          <p className="text-base text-stone-600 mt-2 font-medium">
+            Get in touch for support or inquiries
+          </p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+          <div className="flex items-center gap-4 p-6 rounded-2xl bg-white border border-[#EADBCA]">
+            <div className="w-12 h-12 rounded-xl bg-[#E8D9C5] text-[#7A4515] flex items-center justify-center shrink-0">
+              <Phone className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-bold text-stone-900 text-lg">M-Pesa Contact</h3>
+              <p className="text-stone-600 font-medium">0710507016</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 p-6 rounded-2xl bg-white border border-[#EADBCA]">
+            <div className="w-12 h-12 rounded-xl bg-[#E8D9C5] text-[#7A4515] flex items-center justify-center shrink-0">
+              <Mail className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-bold text-stone-900 text-lg">Email</h3>
+              <p className="text-stone-600 font-medium">brianzach1@gmail.com</p>
+            </div>
           </div>
         </div>
       </section>
