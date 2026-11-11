@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Ticket, Mail, CheckCircle2, ShieldCheck, Zap } from 'lucide-react';
+import { Ticket, Mail, Phone, MapPin, CheckCircle2, ShieldCheck, Zap } from 'lucide-react';
 
 export const Footer: React.FC<{ onNavigate: (tab: string) => void }> = ({ onNavigate }) => {
   const [email, setEmail] = useState('');
@@ -24,11 +24,11 @@ export const Footer: React.FC<{ onNavigate: (tab: string) => void }> = ({ onNavi
                 <Ticket className="w-5 h-5 transform -rotate-12" />
               </div>
               <span className="font-extrabold text-xl text-stone-900">
-                Pulse<span className="text-[#9B5E28]">Pass</span>
+                Punch,Munch<span className="text-[#9B5E28]">$Crunch</span>
               </span>
             </div>
             <p className="text-stone-600 text-sm leading-relaxed max-w-sm">
-              The high-performance event & concert ticketing infrastructure. Concurrency-safe inventory, cryptographic digital passes, instant gate check-ins, and verified artist experiences.
+              Your home for live events and concerts. Verified tickets, instant digital QR passes, fast gate check-ins and zero scalper markups.
             </p>
             <div className="flex items-center gap-4 text-xs font-mono">
               <span className="flex items-center gap-1 text-emerald-800 font-medium">
@@ -104,10 +104,12 @@ export const Footer: React.FC<{ onNavigate: (tab: string) => void }> = ({ onNavi
                 </button>
               </li>
               <li>
-                <span className="text-stone-400 cursor-not-allowed">Stripe Verified Payouts</span>
-              </li>
-              <li>
-                <span className="text-stone-400 cursor-not-allowed">API & Webhooks</span>
+                <button
+                  onClick={() => onNavigate('check-in')}
+                  className="hover:text-[#8A5120] transition-colors"
+                >
+                  Gate Staff Check-In
+                </button>
               </li>
             </ul>
           </div>
@@ -149,16 +151,32 @@ export const Footer: React.FC<{ onNavigate: (tab: string) => void }> = ({ onNavi
           </div>
         </div>
 
+        {/* Contact strip */}
+        <div className="mt-10 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+          <a href="tel:0710507016" className="flex items-center gap-3 p-4 rounded-2xl bg-white/70 border border-[#DFD3C3] hover:border-[#C2824A] transition-colors">
+            <Phone className="w-4 h-4 text-[#965A28]" />
+            <span className="font-semibold text-stone-800">0710507016</span>
+          </a>
+          <a href="mailto:brianzach1@gmail.com" className="flex items-center gap-3 p-4 rounded-2xl bg-white/70 border border-[#DFD3C3] hover:border-[#C2824A] transition-colors">
+            <Mail className="w-4 h-4 text-[#965A28]" />
+            <span className="font-semibold text-stone-800">brianzach1@gmail.com</span>
+          </a>
+          <div className="flex items-center gap-3 p-4 rounded-2xl bg-white/70 border border-[#DFD3C3]">
+            <MapPin className="w-4 h-4 text-[#965A28]" />
+            <span className="font-semibold text-stone-800">Kenya · Events nationwide</span>
+          </div>
+        </div>
+
         {/* Bottom bar */}
         <div className="mt-12 pt-8 border-t border-[#DFD3C3] flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-stone-500">
           <div>
-            © {new Date().getFullYear()} PulsePass Live Technologies. Built with PostgreSQL, Drizzle ORM & Cloud SQL.
+            © {new Date().getFullYear()} Punch,Munch$Crunch. All rights reserved.
           </div>
           <div className="flex items-center gap-6">
             <span className="hover:text-stone-800 cursor-pointer">Terms of Service</span>
             <span className="hover:text-stone-800 cursor-pointer">Privacy Policy</span>
             <span className="hover:text-stone-800 cursor-pointer">Refund Guarantee</span>
-            <span className="hover:text-stone-800 cursor-pointer">Contact Support</span>
+            <a href="mailto:brianzach1@gmail.com" className="hover:text-stone-800">Contact Us</a>
           </div>
         </div>
       </div>

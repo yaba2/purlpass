@@ -9,7 +9,8 @@ import {
   Menu,
   X,
   Compass,
-  Sparkles,
+  Lock,
+  UserPlus,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 
@@ -20,22 +21,43 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab }) => {
-  const { user, role, switchRole, signInWithGoogle, logout } = useAuth();
+  const { user, role, login, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
-  const [roleSwitcherOpen, setRoleSwitcherOpen] = useState(false);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
 
-  // Redirect admin to dashboard when they switch to admin role (not on initial load)
+  // Allow other components (e.g. BookingModal) to open the login modal
   useEffect(() => {
-    if (role === 'admin' && currentTab !== 'admin' && currentTab !== 'home') {
+    const handler = () => {
+      setIsLoginMode(true);
+      setLoginModalOpen(true);
+    };
+    window.addEventListener('open-login-modal', handler);
+    return () => window.removeEventListener('open-login-modal', handler);
+  }, []);
+
+  // Redirect admin to dashboard when they log in
+  useEffect(() => {
+    if (role === 'admin' && currentTab !== 'admin' && currentTab !== 'check-in') {
       setCurrentTab('admin');
     }
   }, [role, currentTab, setCurrentTab]);
 
-  const navItems = [
-    { id: 'home', label: 'Discover', icon: Compass },
-    { id: 'explore', label: 'Explore Events', icon: Search },
-  ];
+  const navItems =
+    role === 'admin'
+      ? []
+      : [
+          { id: 'home', label: 'Discover', icon: Compass },
+          { id: 'explore', label: 'Explore Events', icon: Search },
+        ];
 
   // Customer can see My Tickets
   if (role === 'customer') {
@@ -55,18 +77,47 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab }) => 
 
   // Admin has access to everything
   if (role === 'admin') {
-    navItems.push({ id: 'my-tickets', label: 'My Tickets', icon: Ticket });
     navItems.push({ id: 'admin', label: 'Admin Hub', icon: Shield });
   }
 
-  const roleLabels: Record<string, { label: string; color: string }> = {
-    admin: { label: 'Platform Admin', color: 'bg-rose-100 text-rose-800 border-rose-300' },
-    organizer: { label: 'Organizer', color: 'bg-amber-100 text-amber-900 border-amber-300' },
-    staff: { label: 'Gate Staff', color: 'bg-emerald-100 text-emerald-900 border-emerald-300' },
-    customer: { label: 'Customer', color: 'bg-[#EEDEC8] text-[#59340E] border-[#D8C2A2]' },
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      if (isLoginMode) {
+        await login(email, password);
+        setLoginModalOpen(false);
+      } else {
+        // Register
+        if (password !== confirmPassword) {
+          throw new Error('Passwords do not match');
+        }
+        if (password.length < 6) {
+          throw new Error('Password must be at least 6 characters');
+        }
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, displayName, phone }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Registration failed');
+        }
+        // Auto-login after registration
+        await login(email, password);
+        setLoginModalOpen(false);
+      }
+    } catch (err: any) {
+      setAuthError(err.message || 'Authentication failed');
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   return (
+    <>
     <header className="sticky top-0 z-40 w-full border-b border-[#EADBCA] bg-[#FAF7F0]/95 backdrop-blur-md">
       <div className="w-full px-6 sm:px-8 lg:px-12">
         <div className="flex items-center justify-between h-20">
@@ -117,57 +168,6 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab }) => 
 
           {/* Right actions */}
           <div className="hidden md:flex items-center gap-5">
-            {/* Quick Persona Switcher */}
-            <div className="relative">
-              <button
-                onClick={() => setRoleSwitcherOpen(!roleSwitcherOpen)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-bold transition-colors ${roleLabels[role]?.color || 'bg-white text-stone-700 border-stone-300'}`}
-                title="Switch active role demo persona"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span className="font-mono uppercase">{roleLabels[role]?.label || role}</span>
-                <span className="text-xs opacity-70">▼</span>
-              </button>
-
-              {roleSwitcherOpen && (
-                <div
-                  className="absolute right-0 mt-2 w-60 rounded-2xl bg-white border border-[#E5DAC8] shadow-2xl p-2.5 z-50 animate-in fade-in zoom-in-95"
-                  onClick={() => setRoleSwitcherOpen(false)}
-                >
-                  <div className="text-xs font-bold text-stone-500 uppercase tracking-wider px-3 py-2">
-                    Select Demo Persona
-                  </div>
-                  {([
-                    { id: 'customer', label: 'Customer', desc: 'Browse & book events' },
-                    { id: 'organizer', label: 'Organizer', desc: 'Manage events & bookings' },
-                    { id: 'staff', label: 'Gate Staff', desc: 'Check-in guests' },
-                    { id: 'admin', label: 'Admin', desc: 'Full platform control' },
-                  ] as const).map((r) => (
-                    <button
-                      key={r.id}
-                      onClick={() => {
-                        switchRole(r.id);
-                        if (r.id === 'admin') {
-                          setCurrentTab('admin');
-                        }
-                      }}
-                      className={`w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium flex flex-col ${
-                        role === r.id
-                          ? 'bg-[#EEDEC8] text-[#4F2B07] font-bold'
-                          : 'text-stone-700 hover:bg-[#FAF6EF]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold">{r.label}</span>
-                        {role === r.id && <span className="text-sm">✓</span>}
-                      </div>
-                      <span className="text-xs text-stone-500 font-normal">{r.desc}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
             {/* User Profile / Sign in */}
             {user ? (
               <div className="relative">
@@ -198,13 +198,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab }) => 
                       </div>
                     </div>
                     <div className="py-1">
-                      <button
-                        onClick={() => setCurrentTab('my-tickets')}
-                        className="w-full text-left px-3 py-2 text-xs text-stone-700 hover:text-stone-950 hover:bg-[#FAF6EF] rounded-xl flex items-center gap-2"
-                      >
-                        <Ticket className="w-3.5 h-3.5 text-[#965A28]" />
-                        My Digital Tickets
-                      </button>
+                      {user.role !== 'admin' && (
+                        <button
+                          onClick={() => setCurrentTab('my-tickets')}
+                          className="w-full text-left px-3 py-2 text-xs text-stone-700 hover:text-stone-950 hover:bg-[#FAF6EF] rounded-xl flex items-center gap-2"
+                        >
+                          <Ticket className="w-3.5 h-3.5 text-[#965A28]" />
+                          My Digital Tickets
+                        </button>
+                      )}
                       {(user.role === 'admin' || user.role === 'organizer') && (
                         <button
                           onClick={() => setCurrentTab('admin')}
@@ -229,23 +231,17 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab }) => 
               </div>
             ) : (
               <button
-                onClick={signInWithGoogle}
+                onClick={() => setLoginModalOpen(true)}
                 className="flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-bold bg-[#965A28] hover:bg-[#824B1E] text-white shadow-md shadow-[#965A28]/20 transition-all"
               >
-                <User className="w-4.5 h-4.5" />
+                <Lock className="w-4.5 h-4.5" />
                 Sign In
               </button>
             )}
           </div>
 
           {/* Mobile hamburger */}
-          <div className="flex md:hidden items-center gap-3">
-            <button
-              onClick={() => setRoleSwitcherOpen(!roleSwitcherOpen)}
-              className="text-xs font-mono uppercase bg-[#EEDEC8] text-[#59340E] px-3 py-1.5 rounded-lg border border-[#D8C2A2] font-bold"
-            >
-              {role}
-            </button>
+          <div className="flex md:hidden items-center">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="p-2.5 rounded-lg text-stone-600 hover:text-stone-900 hover:bg-[#F2E8DC]"
@@ -279,50 +275,182 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab }) => 
             ))}
           </div>
 
-          <div className="pt-3 border-t border-[#EADBCA] space-y-2">
-            <div className="text-xs text-stone-500 font-mono">Switch Role:</div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {(['customer', 'organizer', 'staff', 'admin'] as const).map((r) => (
-                <button
-                  key={r}
-                  onClick={() => {
-                    switchRole(r);
-                    if (r === 'admin') {
-                      setCurrentTab('admin');
-                    }
-                    setMobileMenuOpen(false);
-                  }}
-                  className={`text-xs py-1.5 px-2 rounded-lg font-mono uppercase ${
-                    role === r
-                      ? 'bg-[#965A28] text-white'
-                      : 'bg-white text-stone-700 border border-[#DFD3C3]'
-                  }`}
-                >
-                  {r}
-                </button>
-              ))}
-            </div>
-
-            {user ? (
-              <div className="pt-2">
-                <button
-                  onClick={logout}
-                  className="w-full text-center py-2 text-xs font-semibold text-rose-600 bg-rose-50 rounded-xl"
-                >
-                  Sign Out ({user.displayName || user.email})
-                </button>
-              </div>
-            ) : (
+          {user ? (
+            <div className="pt-2">
               <button
-                onClick={signInWithGoogle}
-                className="w-full py-2.5 text-xs font-semibold bg-[#965A28] text-white rounded-xl"
+                onClick={logout}
+                className="w-full text-center py-2 text-xs font-semibold text-rose-600 bg-rose-50 rounded-xl"
               >
-                Sign In with Google
+                Sign Out ({user.displayName || user.email})
               </button>
-            )}
-          </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setLoginModalOpen(true)}
+              className="w-full py-2.5 text-xs font-semibold bg-[#965A28] text-white rounded-xl"
+            >
+              Sign In
+            </button>
+          )}
         </div>
       )}
+
     </header>
+
+    {/* Login/Register Modal - rendered outside header to avoid positioning issues */}
+    {loginModalOpen && (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+          {/* Header with gradient */}
+          <div className="bg-gradient-to-br from-[#9B5E28] via-[#B87A3E] to-[#DEC69E] px-8 py-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                  {isLoginMode ? <Lock className="w-5 h-5 text-white" /> : <UserPlus className="w-5 h-5 text-white" />}
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">
+                    {isLoginMode ? 'Welcome Back' : 'Join Us'}
+                  </h2>
+                  <p className="text-xs text-white/80 font-medium">
+                    {isLoginMode ? 'Sign in to your account' : 'Create your account'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setLoginModalOpen(false);
+                  setAuthError('');
+                }}
+                className="w-8 h-8 rounded-lg bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center transition-colors"
+              >
+                <X className="w-4 h-4 text-white" />
+              </button>
+            </div>
+          </div>
+
+          <div className="p-8 space-y-5">
+            {authError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-sm text-rose-800 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                {authError}
+              </div>
+            )}
+
+            <form onSubmit={handleAuthSubmit} className="space-y-4">
+              {!isLoginMode && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-stone-700 uppercase tracking-wide">
+                    Display Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="John Doe"
+                    className="w-full px-4 py-3 border-2 border-[#E5DAC8] rounded-xl text-sm text-stone-900 focus:outline-none focus:border-[#965A28] focus:ring-2 focus:ring-[#965A28]/10 transition-all placeholder:text-stone-400"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-stone-700 uppercase tracking-wide">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="your@email.com"
+                  className="w-full px-4 py-3 border-2 border-[#E5DAC8] rounded-xl text-sm text-stone-900 focus:outline-none focus:border-[#965A28] focus:ring-2 focus:ring-[#965A28]/10 transition-all placeholder:text-stone-400"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-stone-700 uppercase tracking-wide">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="•••••••••"
+                  className="w-full px-4 py-3 border-2 border-[#E5DAC8] rounded-xl text-sm text-stone-900 focus:outline-none focus:border-[#965A28] focus:ring-2 focus:ring-[#965A28]/10 transition-all placeholder:text-stone-400"
+                />
+              </div>
+
+              {!isLoginMode && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-stone-700 uppercase tracking-wide">
+                    Confirm Password
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="•••••••••"
+                    className="w-full px-4 py-3 border-2 border-[#E5DAC8] rounded-xl text-sm text-stone-900 focus:outline-none focus:border-[#965A28] focus:ring-2 focus:ring-[#965A28]/10 transition-all placeholder:text-stone-400"
+                  />
+                </div>
+              )}
+
+              {!isLoginMode && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-stone-700 uppercase tracking-wide">
+                    Phone <span className="text-stone-400 font-normal">(Optional)</span>
+                  </label>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="0712345678"
+                    className="w-full px-4 py-3 border-2 border-[#E5DAC8] rounded-xl text-sm text-stone-900 focus:outline-none focus:border-[#965A28] focus:ring-2 focus:ring-[#965A28]/10 transition-all placeholder:text-stone-400"
+                  />
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full py-3.5 bg-gradient-to-r from-[#965A28] to-[#B87A3E] hover:from-[#824B1E] hover:to-[#9B5E28] text-white rounded-xl text-sm font-bold shadow-lg shadow-[#965A28]/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+              >
+                {authLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-transparent rounded-full animate-spin" />
+                    {isLoginMode ? 'Signing in...' : 'Creating account...'}
+                  </>
+                ) : (
+                  <>
+                    {isLoginMode ? <Lock className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+                    {isLoginMode ? 'Sign In' : 'Create Account'}
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="pt-2 text-center">
+              <p className="text-sm text-stone-600">
+                {isLoginMode ? "Don't have an account? " : "Already have an account? "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsLoginMode(!isLoginMode);
+                    setAuthError('');
+                  }}
+                  className="text-[#965A28] font-bold hover:text-[#824B1E] underline underline-offset-2 decoration-2 transition-colors"
+                >
+                  {isLoginMode ? 'Create one' : 'Sign in'}
+                </button>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };

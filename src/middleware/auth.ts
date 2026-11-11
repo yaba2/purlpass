@@ -1,5 +1,4 @@
 import { Request, Response, NextFunction } from 'express';
-import { adminAuth } from '../lib/firebase-admin.ts';
 import { getOrCreateUser, getUserByUid, UserProfile } from '../db/users.ts';
 
 export interface AuthRequest extends Request {
@@ -19,51 +18,20 @@ export const requireAuth = async (
 
   const token = authHeader.split('Bearer ')[1].trim();
 
-  // 1. Support quick demo role tokens for easy reviewer testing & automated verification
-  if (token.startsWith('demo-')) {
-    const roleKey = token.replace('demo-', '').replace('-token', '');
-    let uid = 'demo-customer-uid';
-    let email = 'axmedka49@gmail.com';
-    let displayName = 'Ahmed Customer';
-    let role = 'customer';
-
-    if (roleKey === 'admin') {
-      uid = 'demo-admin-uid';
-      email = 'admin@pulsepass.events';
-      displayName = 'Brian Zach (Platform Admin)';
-      role = 'admin';
-    } else if (roleKey === 'organizer') {
-      uid = 'demo-organizer-uid';
-      email = 'events@neonpulse.io';
-      displayName = 'NeonPulse Productions';
-      role = 'organizer';
-    } else if (roleKey === 'staff') {
-      uid = 'demo-staff-uid';
-      email = 'checkin@pulsepass.events';
-      displayName = 'Sam Taylor (Gate Staff)';
-      role = 'staff';
-    }
-
-    try {
-      const user = await getOrCreateUser(uid, email, displayName);
-      req.user = user;
-      req.firebaseUid = uid;
-      return next();
-    } catch (err) {
-      console.error('Demo auth error:', err);
-      return res.status(500).json({ error: 'Internal authentication error' });
-    }
-  }
-
-  // 2. Real Firebase ID Token verification
+  // Decode simple token (format: base64(id:uid:timestamp))
   try {
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    const uid = decodedToken.uid;
-    const email = decodedToken.email || `${uid}@placeholder.pulsepass.events`;
-    const displayName = decodedToken.name || decodedToken.email?.split('@')[0] || 'User';
-    const avatarUrl = decodedToken.picture;
+    const decoded = Buffer.from(token, 'base64').toString('utf-8');
+    const [userId, uid] = decoded.split(':');
+    
+    if (!userId || !uid) {
+      return res.status(401).json({ error: 'Unauthorized: Invalid token format' });
+    }
 
-    const user = await getOrCreateUser(uid, email, displayName, avatarUrl);
+    const user = await getUserByUid(uid);
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized: User not found' });
+    }
+
     if (!user.isActive) {
       return res.status(403).json({ error: 'Account has been deactivated. Please contact support.' });
     }
@@ -72,7 +40,7 @@ export const requireAuth = async (
     req.firebaseUid = uid;
     next();
   } catch (error) {
-    console.error('Error verifying Firebase ID token:', error);
+    console.error('Error verifying token:', error);
     return res.status(401).json({ error: 'Unauthorized: Token is invalid or expired' });
   }
 };
@@ -88,35 +56,17 @@ export const optionalAuth = async (
   }
 
   const token = authHeader.split('Bearer ')[1].trim();
-  if (token.startsWith('demo-')) {
-    const roleKey = token.replace('demo-', '').replace('-token', '');
-    let uid = 'demo-customer-uid';
-    let email = 'axmedka49@gmail.com';
-    let displayName = 'Ahmed Customer';
-    if (roleKey === 'admin') {
-      uid = 'demo-admin-uid';
-      email = 'admin@pulsepass.events';
-      displayName = 'Alex Rivera (Platform Admin)';
-    } else if (roleKey === 'organizer') {
-      uid = 'demo-organizer-uid';
-      email = 'events@neonpulse.io';
-      displayName = 'NeonPulse Productions';
-    } else if (roleKey === 'staff') {
-      uid = 'demo-staff-uid';
-      email = 'checkin@pulsepass.events';
-      displayName = 'Sam Taylor (Gate Staff)';
-    }
-    const user = await getUserByUid(uid);
-    if (user) req.user = user;
-    return next();
-  }
 
   try {
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    const user = await getUserByUid(decodedToken.uid);
-    if (user && user.isActive) {
-      req.user = user;
-      req.firebaseUid = decodedToken.uid;
+    const decoded = Buffer.from(token, 'base64').toString('utf-8');
+    const [userId, uid] = decoded.split(':');
+    
+    if (userId && uid) {
+      const user = await getUserByUid(uid);
+      if (user && user.isActive) {
+        req.user = user;
+        req.firebaseUid = uid;
+      }
     }
   } catch {
     // Ignore optional auth failures

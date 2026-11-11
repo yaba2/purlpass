@@ -26,6 +26,7 @@ import {
 import { getPaymentProvider } from '../services/payment.ts';
 import { getEmailLogs, sendBookingConfirmationEmail } from '../services/email.ts';
 import { getAllUsers, updateUserRole, toggleUserActive } from '../db/users.ts';
+import bcrypt from 'bcrypt';
 
 export const apiRouter = Router();
 
@@ -71,6 +72,106 @@ apiRouter.get('/venues', async (_req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Failed to fetch venues:', error);
     res.status(500).json({ error: 'Failed to fetch venues' });
+  }
+});
+
+// ==========================================
+// AUTHENTICATION ROUTES
+// ==========================================
+
+// Register new user
+apiRouter.post('/auth/register', async (req: Request, res: Response) => {
+  try {
+    const { email, password, displayName, phone } = req.body;
+
+    if (!email || !password || !displayName) {
+      return res.status(400).json({ error: 'Email, password, and display name are required' });
+    }
+
+    // Check if user already exists
+    const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    if (existingUser.length > 0) {
+      return res.status(400).json({ error: 'User with this email already exists' });
+    }
+
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    // Create user
+    const newUser = await db.insert(users).values({
+      uid: crypto.randomUUID(),
+      email,
+      displayName,
+      phone,
+      passwordHash,
+      role: 'customer',
+    }).returning();
+
+    res.status(201).json({
+      message: 'User registered successfully',
+      user: {
+        id: newUser[0].id,
+        email: newUser[0].email,
+        displayName: newUser[0].displayName,
+        role: newUser[0].role,
+      }
+    });
+  } catch (error: any) {
+    console.error('Registration failed:', error);
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+// Login user
+apiRouter.post('/auth/login', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    // Find user by email
+    const userRows = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    if (userRows.length === 0) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const user = userRows[0];
+
+    // Check if user is active
+    if (!user.isActive) {
+      return res.status(403).json({ error: 'Account has been deactivated' });
+    }
+
+    // Verify password
+    if (!user.passwordHash) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+    if (!isValidPassword) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Generate simple token (in production, use JWT)
+    const token = Buffer.from(`${user.id}:${user.uid}:${Date.now()}`).toString('base64');
+
+    res.json({
+      message: 'Login successful',
+      token,
+      user: {
+        id: user.id,
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName,
+        role: user.role,
+        avatarUrl: user.avatarUrl,
+      },
+    });
+  } catch (error: any) {
+    console.error('Login failed:', error);
+    res.status(500).json({ error: 'Login failed' });
   }
 });
 
@@ -1285,6 +1386,78 @@ apiRouter.get('/admin/users', requireAuth, requireRole(['admin']), async (_req: 
   }
 });
 
+// Create new user/staff
+apiRouter.post('/admin/users', requireAuth, requireRole(['admin']), async (req: AuthRequest, res: Response) => {
+  try {
+    const { email, password, displayName, phone, role } = req.body;
+
+    if (!email || !password || !displayName || !role) {
+      return res.status(400).json({ error: 'Email, password, display name, and role are required' });
+    }
+
+    if (!['customer', 'organizer', 'staff', 'admin'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    // Check if user already exists
+    const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    if (existingUser.length > 0) {
+      return res.status(400).json({ error: 'User with this email already exists' });
+    }
+
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    // Create user
+    const newUser = await db.insert(users).values({
+      uid: crypto.randomUUID(),
+      email,
+      displayName,
+      phone,
+      passwordHash,
+      role,
+      isActive: true,
+    }).returning();
+
+    res.status(201).json(newUser[0]);
+  } catch (error: any) {
+    console.error('Create user failed:', error);
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+// Update user
+apiRouter.put('/admin/users/:id', requireAuth, requireRole(['admin']), async (req: AuthRequest, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const { displayName, phone, role, isActive } = req.body;
+
+    if (role && !['customer', 'organizer', 'staff', 'admin'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    const updateData: any = {};
+    if (displayName !== undefined) updateData.displayName = displayName;
+    if (phone !== undefined) updateData.phone = phone;
+    if (role !== undefined) updateData.role = role;
+    if (isActive !== undefined) updateData.isActive = isActive;
+
+    const updated = await db.update(users)
+      .set(updateData)
+      .where(eq(users.id, id))
+      .returning();
+
+    if (updated.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(updated[0]);
+  } catch (error: any) {
+    console.error('Update user failed:', error);
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
 apiRouter.put('/admin/users/:id/role', requireAuth, requireRole(['admin']), async (req: AuthRequest, res: Response) => {
   try {
     const id = Number(req.params.id);
@@ -1307,6 +1480,31 @@ apiRouter.put('/admin/users/:id/status', requireAuth, requireRole(['admin']), as
     res.json(updated);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete user
+apiRouter.delete('/admin/users/:id', requireAuth, requireRole(['admin']), async (req: AuthRequest, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+
+    // Check if user exists
+    const existingUser = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    if (existingUser.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Prevent deleting yourself
+    if (req.user && req.user.id === id) {
+      return res.status(400).json({ error: 'Cannot delete your own account' });
+    }
+
+    await db.delete(users).where(eq(users.id, id));
+
+    res.json({ success: true, message: 'User deleted successfully' });
+  } catch (error: any) {
+    console.error('Delete user failed:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
   }
 });
 

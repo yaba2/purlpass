@@ -22,19 +22,33 @@ import {
   Printer,
   QrCode,
   Edit,
+  UserPlus,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 
 export const AdminPage: React.FC = () => {
   const { token, user, role, switchRole } = useAuth();
-  
+
+  // Check if user is authenticated
+  if (!token || !user) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <AlertCircle className="w-16 h-16 text-amber-500 mx-auto" />
+          <h2 className="text-3xl font-bold text-stone-900">Authentication Required</h2>
+          <p className="text-stone-600">Please log in to access the admin panel.</p>
+        </div>
+      </div>
+    );
+  }
+
   // Restrict access based on role
   if (role === 'customer' || role === 'staff') {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center space-y-4">
           <AlertCircle className="w-16 h-16 text-rose-500 mx-auto" />
-          <h2 className="text-2xl font-bold text-stone-900">Access Denied</h2>
+          <h2 className="text-3xl font-bold text-stone-900">Access Denied</h2>
           <p className="text-stone-600">You don't have permission to access this page.</p>
         </div>
       </div>
@@ -99,6 +113,15 @@ export const AdminPage: React.FC = () => {
 
   // Users management state
   const [usersList, setUsersList] = useState<any[]>([]);
+  const [userModalOpen, setUserModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<any>(null);
+  const [userForm, setUserForm] = useState({
+    email: '',
+    password: '',
+    displayName: '',
+    phone: '',
+    role: 'staff',
+  });
 
   // Settings state
   const [settings, setSettings] = useState<any>({});
@@ -111,15 +134,8 @@ export const AdminPage: React.FC = () => {
   // Alert
   const [notification, setNotification] = useState<string | null>(null);
 
-  // Guarantee valid administrative credentials for Admin Hub operations
-  const effectiveAdminToken =
-    role === 'admin' || role === 'organizer'
-      ? token || 'demo-admin-token'
-      : 'demo-admin-token';
-
-  const authHeaders = {
-    Authorization: `Bearer ${effectiveAdminToken}`,
-  };
+  // Use the actual token from AuthContext - no fallback
+  const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
   const loadOverview = async () => {
     try {
@@ -196,7 +212,7 @@ export const AdminPage: React.FC = () => {
     if (activeTab === 'users') loadUsers();
     if (activeTab === 'settings') loadSettings();
     if (activeTab === 'logs') loadLogs();
-  }, [activeTab, bookingFilterStatus]);
+  }, [activeTab, bookingFilterStatus, token]);
 
   const notify = (msg: string) => {
     setNotification(msg);
@@ -435,6 +451,117 @@ export const AdminPage: React.FC = () => {
     }
   };
 
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log('Creating user with data:', userForm);
+    console.log('Auth headers:', authHeaders);
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify(userForm),
+      });
+
+      console.log('Response status:', res.status);
+      const text = await res.text();
+      console.log('Response text:', text);
+
+      if (res.ok) {
+        notify('User created successfully');
+        setUserModalOpen(false);
+        setUserForm({ email: '', password: '', displayName: '', phone: '', role: 'staff' });
+        loadUsers();
+      } else {
+        const err = text ? JSON.parse(text) : { error: 'Failed to create user' };
+        alert(err.error || 'Failed to create user');
+      }
+    } catch (err: any) {
+      console.error('Create user error:', err);
+      alert(err.message || 'Error creating user');
+    }
+  };
+
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+
+    try {
+      const updateData: any = {
+        displayName: userForm.displayName,
+        phone: userForm.phone,
+        role: userForm.role,
+      };
+
+      const res = await fetch(`/api/admin/users/${editingUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify(updateData),
+      });
+
+      if (res.ok) {
+        notify('User updated successfully');
+        setUserModalOpen(false);
+        setEditingUser(null);
+        setUserForm({ email: '', password: '', displayName: '', phone: '', role: 'staff' });
+        loadUsers();
+      } else {
+        const text = await res.text();
+        const err = text ? JSON.parse(text) : { error: 'Failed to update user' };
+        alert(err.error || 'Failed to update user');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error updating user');
+    }
+  };
+
+  const handleDeleteUser = async (userId: number) => {
+    if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
+      return;
+    }
+
+    console.log('Deleting user with ID:', userId);
+    console.log('Auth headers:', authHeaders);
+
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+
+      console.log('Response status:', res.status);
+      const text = await res.text();
+      console.log('Response text:', text);
+
+      if (res.ok) {
+        notify('User deleted successfully');
+        loadUsers();
+      } else {
+        const err = text ? JSON.parse(text) : { error: 'Failed to delete user' };
+        alert(err.error || 'Failed to delete user');
+      }
+    } catch (err: any) {
+      console.error('Delete user error:', err);
+      alert(err.message || 'Error deleting user');
+    }
+  };
+
+  const openUserModal = (user?: any) => {
+    if (user) {
+      setEditingUser(user);
+      setUserForm({
+        email: user.email,
+        password: '',
+        displayName: user.displayName,
+        phone: user.phone || '',
+        role: user.role,
+      });
+    } else {
+      setEditingUser(null);
+      setUserForm({ email: '', password: '', displayName: '', phone: '', role: 'staff' });
+    }
+    setUserModalOpen(true);
+  };
+
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingSettings(true);
@@ -458,14 +585,14 @@ export const AdminPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono uppercase bg-[#EEDEC8] text-[#59340E] px-2 py-0.5 rounded font-bold border border-[#DECAAC]">
+            <span className="text-xs font-mono uppercase bg-[#EEDEC8] text-[#59340E] px-2 py-0.5 rounded font-bold border border-[#DECAAC]">
               Admin Hub
             </span>
             <span className="text-xs text-stone-600 font-mono">
               PostgreSQL Cloud SQL • Role: {user?.role || 'Admin'}
             </span>
           </div>
-          <h1 className="text-3xl font-extrabold text-stone-900 tracking-tight mt-1">
+          <h1 className="text-4xl font-extrabold text-stone-900 tracking-tight mt-1">
             Platform Management Center
           </h1>
         </div>
@@ -489,7 +616,7 @@ export const AdminPage: React.FC = () => {
               <p className="font-bold text-stone-900">
                 Current Persona: <span className="uppercase font-mono text-[#8A5120]">{role}</span>
               </p>
-              <p className="text-[11px] text-stone-600">
+              <p className="text-sm text-stone-600">
                 You can manage orders, confirm tickets, or switch fully to the Platform Admin persona.
               </p>
             </div>
@@ -521,7 +648,7 @@ export const AdminPage: React.FC = () => {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                   isActive
                     ? 'bg-[#965A28] text-white shadow-md shadow-[#965A28]/20'
                     : 'text-stone-600 hover:text-stone-900 hover:bg-[#FAF6EF]'
@@ -539,69 +666,69 @@ export const AdminPage: React.FC = () => {
         <div className="space-y-8">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="p-5 rounded-2xl bg-white border border-[#EADBCA] space-y-2 shadow-xs">
-              <span className="text-[10px] font-mono uppercase text-stone-500 block">
+              <span className="text-xs font-mono uppercase text-stone-500 block">
                 Total Gross Revenue
               </span>
               <div className="flex items-center justify-between">
-                <span className="text-2xl font-black text-stone-900">
+                <span className="text-3xl font-black text-stone-900">
                   {overview?.totalRevenueFormatted || '$0.00'}
                 </span>
                 <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
                   <DollarSign className="w-4 h-4" />
                 </div>
               </div>
-              <span className="text-[11px] text-emerald-800 font-mono font-medium">
+              <span className="text-sm text-emerald-800 font-mono font-medium">
                 ✓ Verified via Stripe & Gateway
               </span>
             </div>
 
             <div className="p-5 rounded-2xl bg-white border border-[#EADBCA] space-y-2 shadow-xs">
-              <span className="text-[10px] font-mono uppercase text-stone-500 block">
+              <span className="text-xs font-mono uppercase text-stone-500 block">
                 Tickets Sold
               </span>
               <div className="flex items-center justify-between">
-                <span className="text-2xl font-black text-stone-900">
+                <span className="text-3xl font-black text-stone-900">
                   {overview?.ticketsSold || 0}
                 </span>
                 <div className="w-8 h-8 rounded-lg bg-[#F5EDE1] text-[#965A28] flex items-center justify-center font-bold">
                   <Ticket className="w-4 h-4" />
                 </div>
               </div>
-              <span className="text-[11px] text-stone-600 font-mono">
+              <span className="text-sm text-stone-600 font-mono">
                 {overview?.totalCheckedIn || 0} gate check-ins recorded
               </span>
             </div>
 
             <div className="p-5 rounded-2xl bg-white border border-[#EADBCA] space-y-2 shadow-xs">
-              <span className="text-[10px] font-mono uppercase text-stone-500 block">
+              <span className="text-xs font-mono uppercase text-stone-500 block">
                 Confirmed Orders
               </span>
               <div className="flex items-center justify-between">
-                <span className="text-2xl font-black text-stone-900">
+                <span className="text-3xl font-black text-stone-900">
                   {overview?.totalBookings || 0}
                 </span>
                 <div className="w-8 h-8 rounded-lg bg-[#EEDEC8] text-[#59340E] flex items-center justify-center font-bold">
                   <TrendingUp className="w-4 h-4" />
                 </div>
               </div>
-              <span className="text-[11px] text-stone-600 font-mono">
+              <span className="text-sm text-stone-600 font-mono">
                 Zero oversell guarantee active
               </span>
             </div>
 
             <div className="p-5 rounded-2xl bg-white border border-[#EADBCA] space-y-2 shadow-xs">
-              <span className="text-[10px] font-mono uppercase text-stone-500 block">
+              <span className="text-xs font-mono uppercase text-stone-500 block">
                 Published Events
               </span>
               <div className="flex items-center justify-between">
-                <span className="text-2xl font-black text-stone-900">
+                <span className="text-3xl font-black text-stone-900">
                   {overview?.totalEvents || 0}
                 </span>
                 <div className="w-8 h-8 rounded-lg bg-[#F0E6D8] text-[#8A5120] flex items-center justify-center font-bold">
                   <Calendar className="w-4 h-4" />
                 </div>
               </div>
-              <span className="text-[11px] text-[#8A5120] font-mono font-medium">
+              <span className="text-sm text-[#8A5120] font-mono font-medium">
                 {overview?.upcomingEvents || 0} upcoming shows
               </span>
             </div>
@@ -610,19 +737,19 @@ export const AdminPage: React.FC = () => {
           {/* Recent Bookings Table */}
           <div className="p-6 rounded-2xl bg-white border border-[#EADBCA] space-y-4 shadow-xs">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-sm text-stone-900">Recent Customer Orders</h3>
+              <h3 className="font-bold text-base text-stone-900">Recent Customer Orders</h3>
               <button
                 onClick={() => setActiveTab('bookings')}
-                className="text-xs text-[#8A5120] hover:text-[#5C330B] font-semibold"
+                className="text-sm text-[#8A5120] hover:text-[#5C330B] font-semibold"
               >
                 View All Orders →
               </button>
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-left text-sm">
                 <thead>
-                  <tr className="border-b border-[#EADBCA] text-stone-500 font-mono text-[10px] uppercase bg-[#FAF7F0]">
+                  <tr className="border-b border-[#EADBCA] text-stone-500 font-mono text-xs uppercase bg-[#FAF7F0]">
                     <th className="py-2.5 px-3">Order Ref</th>
                     <th className="py-2.5 px-3">Customer</th>
                     <th className="py-2.5 px-3">Event</th>
@@ -638,7 +765,7 @@ export const AdminPage: React.FC = () => {
                       <td className="py-2.5 px-3 text-[#965A28] font-bold">{b.bookingReference}</td>
                       <td className="py-2.5 px-3 font-sans text-stone-900">
                         {b.customerName}
-                        <span className="block text-[10px] text-stone-500 font-mono">{b.customerEmail}</span>
+                        <span className="block text-xs text-stone-500 font-mono">{b.customerEmail}</span>
                       </td>
                       <td className="py-2.5 px-3 font-sans text-stone-700">{b.eventTitle}</td>
                       <td className="py-2.5 px-3 text-stone-900 font-bold">
@@ -646,7 +773,7 @@ export const AdminPage: React.FC = () => {
                       </td>
                       <td className="py-2.5 px-3">
                         <span
-                          className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                          className={`text-xs px-2 py-0.5 rounded font-bold ${
                             b.status === 'confirmed'
                               ? 'bg-emerald-100 text-emerald-800'
                               : b.status === 'pending'
@@ -666,7 +793,7 @@ export const AdminPage: React.FC = () => {
                             <>
                               <button
                                 onClick={() => setConfirmModalBooking(b)}
-                                className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold flex items-center gap-1 shadow-xs"
+                                className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1 shadow-xs"
                                 title="Accept & Confirm Order"
                               >
                                 <Check className="w-3 h-3" />
@@ -674,7 +801,7 @@ export const AdminPage: React.FC = () => {
                               </button>
                               <button
                                 onClick={() => setRejectModalBooking(b)}
-                                className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-semibold flex items-center gap-1 border border-rose-200"
+                                className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold flex items-center gap-1 border border-rose-200"
                                 title="Reject Order"
                               >
                                 <X className="w-3 h-3" />
@@ -684,7 +811,7 @@ export const AdminPage: React.FC = () => {
                           ) : (
                             <button
                               onClick={() => handleViewOrderDetails(b.id)}
-                              className="px-2.5 py-1 rounded-lg bg-[#FAF7F0] hover:bg-[#F0E6D8] text-stone-700 text-[11px] font-semibold flex items-center gap-1 border border-[#DFD3C3]"
+                              className="px-2.5 py-1 rounded-lg bg-[#FAF7F0] hover:bg-[#F0E6D8] text-stone-700 text-sm font-semibold flex items-center gap-1 border border-[#DFD3C3]"
                             >
                               <Eye className="w-3 h-3 text-[#965A28]" />
                               <span>View</span>
@@ -729,11 +856,11 @@ export const AdminPage: React.FC = () => {
                   />
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono text-[#8A5120] uppercase font-bold">
+                      <span className="text-xs font-mono text-[#8A5120] uppercase font-bold">
                         {ev.categoryName || 'Event'}
                       </span>
                       <span
-                        className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-bold ${
+                        className={`text-xs font-mono uppercase px-2 py-0.5 rounded font-bold ${
                           ev.status === 'published'
                             ? 'bg-emerald-100 text-emerald-800'
                             : ev.status === 'cancelled'
@@ -851,7 +978,7 @@ export const AdminPage: React.FC = () => {
           <div className="p-6 rounded-2xl bg-white border border-[#EADBCA] overflow-x-auto shadow-xs">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-[#EADBCA] text-stone-500 font-mono text-[10px] uppercase bg-[#FAF7F0]">
+                <tr className="border-b border-[#EADBCA] text-stone-500 font-mono text-xs uppercase bg-[#FAF7F0]">
                   <th className="py-2.5 px-3">Reference</th>
                   <th className="py-2.5 px-3">Customer</th>
                   <th className="py-2.5 px-3">Event</th>
@@ -874,7 +1001,7 @@ export const AdminPage: React.FC = () => {
                     </td>
                     <td className="py-2.5 px-3 font-sans text-stone-900">
                       {b.customerName}
-                      <span className="block text-[10px] text-stone-500 font-mono">{b.customerEmail}</span>
+                      <span className="block text-xs text-stone-500 font-mono">{b.customerEmail}</span>
                     </td>
                     <td className="py-2.5 px-3 font-sans text-stone-700">{b.eventTitle}</td>
                     <td className="py-2.5 px-3">
@@ -885,7 +1012,7 @@ export const AdminPage: React.FC = () => {
                     </td>
                     <td className="py-2.5 px-3">
                       <span
-                        className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                        className={`text-xs px-2 py-0.5 rounded font-bold ${
                           b.status === 'confirmed'
                             ? 'bg-emerald-100 text-emerald-800'
                             : b.status === 'pending'
@@ -905,7 +1032,7 @@ export const AdminPage: React.FC = () => {
                             {/* Accept & Confirm Action */}
                             <button
                               onClick={() => setConfirmModalBooking(b)}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold flex items-center gap-1 shadow-xs"
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold flex items-center gap-1 shadow-xs"
                               title="Accept & Confirm Order"
                             >
                               <Check className="w-3.5 h-3.5" />
@@ -915,7 +1042,7 @@ export const AdminPage: React.FC = () => {
                             {/* Reject Action */}
                             <button
                               onClick={() => setRejectModalBooking(b)}
-                              className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-semibold flex items-center gap-1 border border-rose-200"
+                              className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-sm font-semibold flex items-center gap-1 border border-rose-200"
                               title="Reject Order"
                             >
                               <X className="w-3.5 h-3.5" />
@@ -925,7 +1052,7 @@ export const AdminPage: React.FC = () => {
                         ) : b.status === 'confirmed' ? (
                           <button
                             onClick={() => setRefundModalBooking(b)}
-                            className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 text-[11px] font-semibold border border-amber-200"
+                            className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 text-sm font-semibold border border-amber-200"
                           >
                             Refund
                           </button>
@@ -934,7 +1061,7 @@ export const AdminPage: React.FC = () => {
                         {/* View Details Action */}
                         <button
                           onClick={() => handleViewOrderDetails(b.id)}
-                          className="px-2.5 py-1 rounded-lg bg-[#FAF7F0] hover:bg-[#F0E6D8] text-stone-700 text-[11px] font-semibold flex items-center gap-1 border border-[#DFD3C3]"
+                          className="px-2.5 py-1 rounded-lg bg-[#FAF7F0] hover:bg-[#F0E6D8] text-stone-700 text-sm font-semibold flex items-center gap-1 border border-[#DFD3C3]"
                           title="View Full Booking Breakdown"
                         >
                           <Eye className="w-3.5 h-3.5 text-[#965A28]" />
@@ -951,54 +1078,113 @@ export const AdminPage: React.FC = () => {
       )}
 
       {/* 4. USERS TAB */}
-      {activeTab === 'users' && (
-        <div className="space-y-6">
-          <h3 className="font-bold text-sm text-stone-900">Platform Users & Access Control</h3>
+      {activeTab === 'users' && (() => {
+        const systemUsers = usersList.filter((u) => u.role !== 'customer');
+        const customerUsers = usersList.filter((u) => u.role === 'customer');
+        const renderTable = (list: any[], isSystem: boolean) => (
           <div className="p-6 rounded-2xl bg-white border border-[#EADBCA] overflow-x-auto shadow-xs">
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-[#EADBCA] text-stone-500 font-mono text-[10px] uppercase bg-[#FAF7F0]">
+                <tr className="border-b border-[#EADBCA] text-stone-500 font-mono text-xs uppercase bg-[#FAF7F0]">
                   <th className="py-2.5 px-3">User</th>
                   <th className="py-2.5 px-3">Email</th>
                   <th className="py-2.5 px-3">Role</th>
                   <th className="py-2.5 px-3">Status</th>
-                  <th className="py-2.5 px-3">Registered</th>
+                  <th className="py-2.5 px-3">{isSystem ? 'Created' : 'Signed Up'}</th>
+                  <th className="py-2.5 px-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#F0E6D8] font-mono">
-                {usersList.map((u) => (
+                {list.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-6 px-3 text-center text-stone-500 font-sans">
+                      No {isSystem ? 'system users' : 'customers'} yet.
+                    </td>
+                  </tr>
+                )}
+                {list.map((u) => (
                   <tr key={u.id} className="hover:bg-[#FAF7F0]">
                     <td className="py-2.5 px-3 font-sans font-bold text-stone-900">
                       {u.displayName || 'User'}
                     </td>
                     <td className="py-2.5 px-3 text-stone-700">{u.email}</td>
                     <td className="py-2.5 px-3">
-                      <select
-                        value={u.role}
-                        onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                        className="bg-white border border-[#DFD3C3] rounded-lg px-2 py-1 text-xs text-stone-800 font-semibold"
-                      >
-                        <option value="customer">customer</option>
-                        <option value="staff">staff</option>
-                        <option value="organizer">organizer</option>
-                        <option value="admin">admin</option>
-                      </select>
+                      {isSystem ? (
+                        <select
+                          value={u.role}
+                          onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                          className="bg-white border border-[#DFD3C3] rounded-lg px-2 py-1 text-xs text-stone-800 font-semibold"
+                        >
+                          <option value="staff">staff</option>
+                          <option value="organizer">organizer</option>
+                          <option value="admin">admin</option>
+                        </select>
+                      ) : (
+                        <span className="text-xs px-2 py-0.5 rounded bg-stone-100 text-stone-700 font-semibold">customer</span>
+                      )}
                     </td>
                     <td className="py-2.5 px-3">
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${u.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                      <span className={`text-xs px-2 py-0.5 rounded font-bold ${u.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
                         {u.isActive ? 'Active' : 'Disabled'}
                       </span>
                     </td>
                     <td className="py-2.5 px-3 text-stone-600">
                       {new Date(u.createdAt).toLocaleDateString()}
                     </td>
+                    <td className="py-2.5 px-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => openUserModal(u)}
+                          className="px-2 py-1 rounded-lg bg-[#FAF7F0] hover:bg-[#F0E6D8] text-stone-700 text-xs font-semibold flex items-center gap-1 border border-[#DFD3C3]"
+                          title="Edit User"
+                        >
+                          <Edit className="w-3 h-3" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteUser(u.id)}
+                          className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold flex items-center gap-1 border border-rose-200"
+                          title="Delete User"
+                        >
+                          <X className="w-3 h-3" />
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        );
+        return (
+          <div className="space-y-8">
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-sm text-stone-900">System Users ({systemUsers.length})</h3>
+                  <p className="text-xs text-stone-500">Accounts created by admins. Manage their roles and access here.</p>
+                </div>
+                <button
+                  onClick={() => openUserModal()}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#965A28] hover:bg-[#824B1E] text-white text-sm font-semibold shadow-md shadow-[#965A28]/20 transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add System User
+                </button>
+              </div>
+              {renderTable(systemUsers, true)}
+            </section>
+            <section className="space-y-3">
+              <div>
+                <h3 className="font-bold text-sm text-stone-900">Customers ({customerUsers.length})</h3>
+                <p className="text-xs text-stone-500">Self-registered accounts from the public sign-up.</p>
+              </div>
+              {renderTable(customerUsers, false)}
+            </section>
+          </div>
+        );
+      })()}
 
       {/* 5. SETTINGS TAB */}
       {activeTab === 'settings' && (
@@ -1083,7 +1269,7 @@ export const AdminPage: React.FC = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
-                  <tr className="border-b border-[#EADBCA] text-stone-500 font-mono text-[10px] uppercase bg-[#FAF7F0]">
+                  <tr className="border-b border-[#EADBCA] text-stone-500 font-mono text-xs uppercase bg-[#FAF7F0]">
                     <th className="py-2 px-3">ID</th>
                     <th className="py-2 px-3">Recipient</th>
                     <th className="py-2 px-3">Subject</th>
@@ -1119,7 +1305,7 @@ export const AdminPage: React.FC = () => {
                     <span className="font-bold text-[#8A5120] uppercase">[{log.action}]</span>{' '}
                     <span className="text-stone-800">{log.details}</span>
                   </div>
-                  <span className="text-[10px] text-stone-500">{new Date(log.createdAt).toLocaleTimeString()}</span>
+                  <span className="text-xs text-stone-500">{new Date(log.createdAt).toLocaleTimeString()}</span>
                 </div>
               ))}
             </div>
@@ -1203,7 +1389,7 @@ export const AdminPage: React.FC = () => {
 
               {/* Ticket Tiers Setup */}
               <div className="pt-2 border-t border-[#EADBCA] space-y-3">
-                <h4 className="font-bold text-stone-900 uppercase text-[10px] font-mono">Admission Ticket Tiers</h4>
+                <h4 className="font-bold text-stone-900 uppercase text-xs font-mono">Admission Ticket Tiers</h4>
                 {newEvent.ticketTiers.map((t, idx) => (
                   <div key={idx} className="p-3 bg-white border border-[#DFD3C3] rounded-xl grid grid-cols-3 gap-2">
                     <input
@@ -1457,7 +1643,7 @@ export const AdminPage: React.FC = () => {
                 <CheckCircle2 className="w-4 h-4 text-emerald-700" />
                 <span>Confirming this order will:</span>
               </div>
-              <ul className="list-disc pl-5 space-y-0.5 text-[11px] text-emerald-800">
+              <ul className="list-disc pl-5 space-y-0.5 text-sm text-emerald-800">
                 <li>Generate unique cryptographic QR code tickets</li>
                 <li>Convert reserved ticket capacity to confirmed sold inventory</li>
                 <li>Dispatch a confirmation email with digital passes to the customer</li>
@@ -1515,7 +1701,7 @@ export const AdminPage: React.FC = () => {
             </p>
 
             <div>
-              <label className="text-[11px] text-stone-600 font-semibold block mb-1">
+              <label className="text-sm text-stone-600 font-semibold block mb-1">
                 Reason for Rejection *
               </label>
               <textarea
@@ -1527,7 +1713,7 @@ export const AdminPage: React.FC = () => {
               />
             </div>
 
-            <p className="text-[11px] text-stone-500 font-mono">
+            <p className="text-sm text-stone-500 font-mono">
               Note: Rejecting releases any reserved inventory back into public sale immediately.
             </p>
 
@@ -1574,7 +1760,7 @@ export const AdminPage: React.FC = () => {
             </p>
 
             <div>
-              <label className="text-[11px] text-stone-600 font-semibold block mb-1">Reason for Refund</label>
+              <label className="text-sm text-stone-600 font-semibold block mb-1">Reason for Refund</label>
               <textarea
                 rows={2}
                 value={refundReason}
@@ -1609,11 +1795,11 @@ export const AdminPage: React.FC = () => {
             <div className="flex items-center justify-between border-b border-[#EADBCA] pb-4">
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono uppercase bg-[#EEDEC8] text-[#59340E] px-2 py-0.5 rounded font-bold">
+                  <span className="text-xs font-mono uppercase bg-[#EEDEC8] text-[#59340E] px-2 py-0.5 rounded font-bold">
                     Order Reference
                   </span>
                   <span
-                    className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-bold ${
+                    className={`text-xs font-mono uppercase px-2 py-0.5 rounded font-bold ${
                       orderDetailModal.booking.status === 'confirmed'
                         ? 'bg-emerald-100 text-emerald-800'
                         : orderDetailModal.booking.status === 'pending'
@@ -1641,7 +1827,7 @@ export const AdminPage: React.FC = () => {
             {/* Customer & Event Info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div className="p-4 rounded-xl bg-white border border-[#EADBCA] space-y-1.5 shadow-xs">
-                <span className="text-[10px] font-mono uppercase text-stone-500 font-bold block">
+                <span className="text-xs font-mono uppercase text-stone-500 font-bold block">
                   Customer Information
                 </span>
                 <div className="font-bold text-stone-900 text-sm">
@@ -1655,13 +1841,13 @@ export const AdminPage: React.FC = () => {
                     {orderDetailModal.booking.customerPhone}
                   </div>
                 )}
-                <div className="text-[10px] text-stone-400 pt-1">
+                <div className="text-xs text-stone-400 pt-1">
                   Ordered: {new Date(orderDetailModal.booking.createdAt).toLocaleString()}
                 </div>
               </div>
 
               <div className="p-4 rounded-xl bg-white border border-[#EADBCA] space-y-1.5 shadow-xs">
-                <span className="text-[10px] font-mono uppercase text-stone-500 font-bold block">
+                <span className="text-xs font-mono uppercase text-stone-500 font-bold block">
                   Event Details
                 </span>
                 <div className="font-bold text-stone-900 text-sm">
@@ -1678,7 +1864,7 @@ export const AdminPage: React.FC = () => {
 
             {/* Order Items Table */}
             <div className="space-y-2">
-              <span className="text-[10px] font-mono uppercase text-stone-500 font-bold block">
+              <span className="text-xs font-mono uppercase text-stone-500 font-bold block">
                 Purchased Ticket Items
               </span>
               <div className="p-4 rounded-xl bg-white border border-[#EADBCA] space-y-2 text-xs shadow-xs">
@@ -1695,7 +1881,7 @@ export const AdminPage: React.FC = () => {
                 ))}
 
                 {/* Subtotal & Fee breakdown */}
-                <div className="pt-2 space-y-1 text-stone-600 text-[11px]">
+                <div className="pt-2 space-y-1 text-stone-600 text-sm">
                   <div className="flex justify-between">
                     <span>Subtotal:</span>
                     <span>${(orderDetailModal.booking.subtotal / 100).toFixed(2)}</span>
@@ -1721,7 +1907,7 @@ export const AdminPage: React.FC = () => {
             {/* Issued Tickets List (if confirmed) */}
             {orderDetailModal.tickets && orderDetailModal.tickets.length > 0 && (
               <div className="space-y-2">
-                <span className="text-[10px] font-mono uppercase text-stone-500 font-bold block">
+                <span className="text-xs font-mono uppercase text-stone-500 font-bold block">
                   Issued Admission Passes ({orderDetailModal.tickets.length})
                 </span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
@@ -1729,9 +1915,9 @@ export const AdminPage: React.FC = () => {
                     <div key={t.id} className="p-3 bg-white border border-[#EADBCA] rounded-xl flex items-center justify-between">
                       <div>
                         <div className="font-bold text-[#965A28]">{t.ticketCode}</div>
-                        <div className="font-sans text-stone-800 font-medium text-[11px]">{t.attendeeName}</div>
+                        <div className="font-sans text-stone-800 font-medium text-sm">{t.attendeeName}</div>
                       </div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${t.status === 'checked_in' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-bold ${t.status === 'checked_in' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
                         {t.status === 'checked_in' ? 'Admitted' : 'Valid'}
                       </span>
                     </div>
@@ -1800,6 +1986,135 @@ export const AdminPage: React.FC = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* User Create/Edit Modal */}
+      {userModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-gradient-to-br from-[#9B5E28] via-[#B87A3E] to-[#DEC69E] px-8 py-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                    <Users className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-white">
+                      {editingUser ? 'Edit User' : 'Add New User'}
+                    </h2>
+                    <p className="text-xs text-white/80 font-medium">
+                      {editingUser ? 'Update user information' : 'Create a new user account'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setUserModalOpen(false);
+                    setEditingUser(null);
+                    setUserForm({ email: '', password: '', displayName: '', phone: '', role: 'staff' });
+                  }}
+                  className="w-8 h-8 rounded-lg bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center transition-colors"
+                >
+                  <X className="w-4 h-4 text-white" />
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={editingUser ? handleUpdateUser : handleCreateUser} className="p-8 space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-stone-700 uppercase tracking-wide">
+                  Display Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={userForm.displayName}
+                  onChange={(e) => setUserForm({ ...userForm, displayName: e.target.value })}
+                  placeholder="John Doe"
+                  className="w-full px-4 py-3 border-2 border-[#E5DAC8] rounded-xl text-sm text-stone-900 focus:outline-none focus:border-[#965A28] focus:ring-2 focus:ring-[#965A28]/10 transition-all placeholder:text-stone-400"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-stone-700 uppercase tracking-wide">
+                  Email Address *
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={userForm.email}
+                  onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+                  placeholder="your@email.com"
+                  disabled={!!editingUser}
+                  className="w-full px-4 py-3 border-2 border-[#E5DAC8] rounded-xl text-sm text-stone-900 focus:outline-none focus:border-[#965A28] focus:ring-2 focus:ring-[#965A28]/10 transition-all placeholder:text-stone-400 disabled:bg-stone-100 disabled:cursor-not-allowed"
+                />
+              </div>
+
+              {!editingUser && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-stone-700 uppercase tracking-wide">
+                    Password *
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    value={userForm.password}
+                    onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                    placeholder="•••••••••"
+                    className="w-full px-4 py-3 border-2 border-[#E5DAC8] rounded-xl text-sm text-stone-900 focus:outline-none focus:border-[#965A28] focus:ring-2 focus:ring-[#965A28]/10 transition-all placeholder:text-stone-400"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-stone-700 uppercase tracking-wide">
+                  Phone <span className="text-stone-400 font-normal">(Optional)</span>
+                </label>
+                <input
+                  type="tel"
+                  value={userForm.phone}
+                  onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })}
+                  placeholder="0712345678"
+                  className="w-full px-4 py-3 border-2 border-[#E5DAC8] rounded-xl text-sm text-stone-900 focus:outline-none focus:border-[#965A28] focus:ring-2 focus:ring-[#965A28]/10 transition-all placeholder:text-stone-400"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-stone-700 uppercase tracking-wide">
+                  Role *
+                </label>
+                <select
+                  required
+                  value={userForm.role}
+                  onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
+                  className="w-full px-4 py-3 border-2 border-[#E5DAC8] rounded-xl text-sm text-stone-900 focus:outline-none focus:border-[#965A28] focus:ring-2 focus:ring-[#965A28]/10 transition-all"
+                >
+                  {editingUser?.role === 'customer' && <option value="customer">Customer</option>}
+                  <option value="staff">Staff</option>
+                  <option value="organizer">Organizer</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-3.5 bg-gradient-to-r from-[#965A28] to-[#B87A3E] hover:from-[#824B1E] hover:to-[#9B5E28] text-white rounded-xl text-sm font-bold shadow-lg shadow-[#965A28]/30 flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+              >
+                {editingUser ? (
+                  <>
+                    <Edit className="w-4 h-4" />
+                    Update User
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-4 h-4" />
+                    Create User
+                  </>
+                )}
+              </button>
+            </form>
           </div>
         </div>
       )}

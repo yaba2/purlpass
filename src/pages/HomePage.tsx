@@ -9,6 +9,9 @@ import {
   Phone,
   Mail,
   Trophy,
+  Search,
+  CreditCard,
+  QrCode,
 } from 'lucide-react';
 import { EventCard, EventItem } from '../components/EventCard.tsx';
 
@@ -62,7 +65,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
         {/* Content */}
         <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-          <div className="max-w-2xl space-y-8">
+          <div className="max-w-3xl space-y-8">
             <div className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-white/15 backdrop-blur-md border border-white/30 text-white text-sm font-bold uppercase tracking-wide">
               <Sparkles className="w-4 h-4 text-[#DEC9A6]" />
               <span>Next-Gen Event & Concert Ticketing</span>
@@ -105,6 +108,21 @@ export const HomePage: React.FC<HomePageProps> = ({
 
       {/* Rest of the content with container */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16 pb-20 pt-12">
+
+      {/* STATS STRIP */}
+      <section className="-mt-24 relative z-20 grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { v: '100%', l: 'Verified Tickets' },
+          { v: 'Instant', l: 'QR Delivery' },
+          { v: '0', l: 'Scalper Markups' },
+          { v: '24/7', l: 'Online Booking' },
+        ].map((x) => (
+          <div key={x.l} className="p-6 rounded-2xl bg-white border border-[#EADBCA] shadow-lg text-center">
+            <div className="text-2xl sm:text-3xl font-black text-[#965A28]">{x.v}</div>
+            <div className="text-xs sm:text-sm font-semibold text-stone-600 mt-1">{x.l}</div>
+          </div>
+        ))}
+      </section>
 
       {/* 2. FEATURED HEADLINER SHOWS */}
       {featuredEvents.length > 0 && (
@@ -184,9 +202,9 @@ export const HomePage: React.FC<HomePageProps> = ({
             <div className="w-14 h-14 rounded-2xl bg-[#E8D9C5] text-[#7A4515] flex items-center justify-center mx-auto md:mx-0">
               <ShieldCheck className="w-6 h-6" />
             </div>
-            <h3 className="font-extrabold text-stone-900 text-xl">Atomic Zero-Oversell Engine</h3>
+            <h3 className="font-extrabold text-stone-900 text-xl">No Overselling, Ever</h3>
             <p className="text-base text-stone-600 leading-relaxed font-medium">
-              Every ticket reservation uses ACID database transactions in PostgreSQL. Never arrive to a venue to find a seat duplicated.
+              Every ticket is reserved safely in real time, so you never arrive at a venue to find your seat double-booked.
             </p>
           </div>
 
@@ -204,11 +222,34 @@ export const HomePage: React.FC<HomePageProps> = ({
             <div className="w-14 h-14 rounded-2xl bg-[#E8D9C5] text-[#7A4515] flex items-center justify-center mx-auto md:mx-0">
               <Flame className="w-6 h-6" />
             </div>
-            <h3 className="font-extrabold text-stone-900 text-xl">Organizer & Gate Scanner Hub</h3>
+            <h3 className="font-extrabold text-stone-900 text-xl">Fast Gate Check-In</h3>
             <p className="text-base text-stone-600 leading-relaxed font-medium">
-              Authorized check-in staff validate tickets in milliseconds using device cameras, recording attendance timestamps directly to Cloud SQL.
+              Event staff scan your QR pass with a phone camera and let you in within seconds.
             </p>
           </div>
+        </div>
+      </section>
+
+      {/* HOW IT WORKS */}
+      <section className="space-y-8">
+        <div className="text-center">
+          <h2 className="text-3xl sm:text-4xl font-black text-stone-900 tracking-tight">How It Works</h2>
+          <p className="text-base text-stone-600 mt-2 font-medium">Three simple steps from browsing to the gate</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[
+            { icon: Search, t: '1. Find an event', d: 'Browse concerts, festivals and shows happening near you.' },
+            { icon: CreditCard, t: '2. Book & pay', d: 'Pick your tickets and pay securely, including by M-Pesa.' },
+            { icon: QrCode, t: '3. Show your QR', d: 'Get your digital pass instantly and scan it at the gate.' },
+          ].map(({ icon: Icon, t, d }) => (
+            <div key={t} className="p-8 rounded-2xl bg-white border border-[#EADBCA] hover:border-[#C2824A] hover:shadow-md transition-all text-center space-y-3">
+              <div className="w-14 h-14 rounded-2xl bg-[#E8D9C5] text-[#7A4515] flex items-center justify-center mx-auto">
+                <Icon className="w-6 h-6" />
+              </div>
+              <h3 className="font-extrabold text-stone-900 text-lg">{t}</h3>
+              <p className="text-stone-600 font-medium">{d}</p>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -239,7 +280,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       <section className="rounded-3xl bg-[#F4EDE2] border border-[#DFCDB7] p-10 lg:p-16 shadow-md">
         <div className="text-center mb-8">
           <h2 className="text-3xl sm:text-4xl font-black text-stone-900 tracking-tight">
-            Contact Us
+            Get in Touch
           </h2>
           <p className="text-base text-stone-600 mt-2 font-medium">
             Get in touch for support or inquiries
@@ -251,8 +292,8 @@ export const HomePage: React.FC<HomePageProps> = ({
               <Phone className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-bold text-stone-900 text-lg">M-Pesa Contact</h3>
-              <p className="text-stone-600 font-medium">0710507016</p>
+              <h3 className="font-bold text-stone-900 text-lg">Contact Us</h3>
+              <a href="tel:0710507016" className="text-stone-600 font-medium hover:text-[#8A5120]">0710507016</a>
             </div>
           </div>
           <div className="flex items-center gap-4 p-6 rounded-2xl bg-white border border-[#EADBCA]">
@@ -261,7 +302,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-stone-900 text-lg">Email</h3>
-              <p className="text-stone-600 font-medium">brianzach1@gmail.com</p>
+              <a href="mailto:brianzach1@gmail.com" className="text-stone-600 font-medium hover:text-[#8A5120]">brianzach1@gmail.com</a>
             </div>
           </div>
         </div>

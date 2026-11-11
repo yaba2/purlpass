@@ -17,6 +17,7 @@ import {
   Smartphone,
   Building2,
   Banknote,
+  Lock as LockIcon,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 
@@ -86,15 +87,23 @@ export const BookingModal: React.FC<BookingModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      console.log('BookingModal opened');
+      console.log('Event:', event);
+      console.log('Ticket types:', ticketTypes);
+      console.log('User:', user);
       setStep('select');
       setErrorMessage(null);
       setReservation(null);
       setConfirmedData(null);
       setEmailResent(false);
 
-      const firstAvailable = ticketTypes.find((t) => !t.isSoldOut);
-      if (firstAvailable) {
-        setQuantities({ [firstAvailable.id]: 1 });
+      if (ticketTypes && ticketTypes.length > 0) {
+        const firstAvailable = ticketTypes.find((t) => !t.isSoldOut);
+        if (firstAvailable) {
+          setQuantities({ [firstAvailable.id]: 1 });
+        } else {
+          setQuantities({});
+        }
       } else {
         setQuantities({});
       }
@@ -121,6 +130,12 @@ export const BookingModal: React.FC<BookingModalProps> = ({
 
   if (!isOpen) return null;
 
+  // Ensure we have event and ticketTypes
+  if (!event || !ticketTypes || ticketTypes.length === 0) {
+    console.error('BookingModal: Missing event or ticketTypes', { event, ticketTypes });
+    return null;
+  }
+
   // Financial calculations
   const subtotalCents = ticketTypes.reduce((acc, t) => {
     const qty = quantities[t.id] || 0;
@@ -142,6 +157,10 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   const handleProceedToDetails = () => {
     if (totalTicketsSelected <= 0) {
       setErrorMessage('Please choose at least 1 ticket.');
+      return;
+    }
+    if (!user) {
+      setErrorMessage('Please log in or register to continue with booking.');
       return;
     }
     setErrorMessage(null);
@@ -223,6 +242,19 @@ export const BookingModal: React.FC<BookingModalProps> = ({
         return;
       }
 
+      // For M-Pesa, show payment instructions before confirming
+      if (gateway === 'mpesa') {
+        alert(`M-Pesa Payment Instructions:
+
+1. You will receive an STK Push on your phone: ${customerPhone}
+2. Enter your M-Pesa PIN to complete payment
+3. Payment will be processed instantly
+
+Merchant M-Pesa Number: 0710507016
+
+Your booking reference: ${bookingReference}`);
+      }
+
       const verifyRes = await fetch('/api/bookings/verify-payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -266,7 +298,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-[#FCFAF7] border border-[#E5DAC8] rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden text-stone-900">
         {/* Header */}
         <div className="px-6 py-4 border-b border-[#EADBCA] flex items-center justify-between bg-[#F7F2EA]">
@@ -418,6 +450,29 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Login Prompt if not authenticated */}
+              {!user && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3">
+                  <div className="flex items-center gap-2">
+                    <LockIcon className="w-5 h-5 text-amber-600" />
+                    <h4 className="font-bold text-sm text-amber-900">Login Required</h4>
+                  </div>
+                  <p className="text-xs text-amber-800">
+                    Please log in or register to continue with your booking. This ensures your tickets are linked to your account.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      window.dispatchEvent(new CustomEvent('open-login-modal'));
+                    }}
+                    className="w-full py-2.5 rounded-xl bg-[#965A28] hover:bg-[#824B1E] text-white text-xs font-bold shadow-md shadow-[#965A28]/20 transition-all"
+                  >
+                    Go to Login / Register
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -473,15 +528,16 @@ export const BookingModal: React.FC<BookingModalProps> = ({
 
                 <div>
                   <label className="text-[11px] text-stone-600 font-semibold block mb-1">
-                    Phone (SMS Ticket Alerts & Gate Updates)
+                    Phone Number * (Required for M-Pesa & Ticket Alerts)
                   </label>
                   <div className="relative">
                     <Phone className="w-4 h-4 absolute left-3 top-2.5 text-stone-400" />
                     <input
                       type="tel"
+                      required
                       value={customerPhone}
                       onChange={(e) => setCustomerPhone(e.target.value)}
-                      placeholder="+1 (555) 234-5678"
+                      placeholder="0712345678"
                       className="w-full pl-9 pr-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-xs text-stone-900 focus:outline-none focus:border-[#965A28]"
                     />
                   </div>
@@ -679,19 +735,50 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                     </span>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <div>
-                      <label className="text-[11px] text-stone-600 block mb-1">M-Pesa Phone Number</label>
+                      <label className="text-[11px] text-stone-600 block mb-1">Your M-Pesa Phone Number</label>
                       <input
                         type="tel"
-                        placeholder="2547XXXXXXXX"
+                        placeholder="0712345678"
                         value={customerPhone}
                         onChange={(e) => setCustomerPhone(e.target.value)}
                         className="w-full px-3 py-2 bg-[#FAF7F0] border border-[#DFD3C3] rounded-lg text-xs font-mono text-stone-900"
                       />
                     </div>
-                    <p className="text-[10px] text-stone-500">
-                      You will receive an M-Pesa STK Push on your phone to complete the payment.
+
+                    <div className="p-4 bg-green-50 border-2 border-green-300 rounded-lg space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Smartphone className="w-5 h-5 text-green-700" />
+                        <h4 className="font-bold text-sm text-green-900">M-Pesa Payment Instructions</h4>
+                      </div>
+                      <div className="space-y-2 text-xs text-green-800">
+                        <div className="flex items-start gap-2">
+                          <span className="font-bold">1.</span>
+                          <span>Enter your M-Pesa phone number above</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <span className="font-bold">2.</span>
+                          <span>Click "Pay with M-Pesa" below</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <span className="font-bold">3.</span>
+                          <span>You will receive an STK Push on your phone</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <span className="font-bold">4.</span>
+                          <span>Enter your M-Pesa PIN to complete payment</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-[#F7EFE4] border border-[#DECAAC] rounded-lg">
+                      <p className="text-xs font-bold text-[#59340E] mb-1">Merchant M-Pesa Number:</p>
+                      <p className="text-sm font-mono text-[#59340E] font-bold">0710507016</p>
+                    </div>
+
+                    <p className="text-[11px] text-stone-500 text-center">
+                      Payment will be processed instantly via M-Pesa. You will receive a confirmation SMS.
                     </p>
                   </div>
                 </div>
@@ -725,7 +812,7 @@ export const BookingModal: React.FC<BookingModalProps> = ({
                       </div>
                       <div className="flex justify-between text-xs">
                         <span className="text-stone-600">Account Name:</span>
-                        <span className="font-mono font-semibold text-stone-900">PulsePass Events Ltd</span>
+                        <span className="font-mono font-semibold text-stone-900">Punch,Munch$Crunch Events</span>
                       </div>
                     </div>
                   </div>
