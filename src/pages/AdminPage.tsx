@@ -25,35 +25,187 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
+import { fetchWithRetry } from '../lib/api.ts';
 
-export const AdminPage: React.FC = () => {
-  const { token, user, role, switchRole } = useAuth();
+const FIELD_CLS = 'w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]';
+const LABEL_CLS = 'text-stone-600 font-semibold block mb-1';
 
-  // Check if user is authenticated
-  if (!token || !user) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center space-y-4">
-          <AlertCircle className="w-16 h-16 text-amber-500 mx-auto" />
-          <h2 className="text-3xl font-bold text-stone-900">Authentication Required</h2>
-          <p className="text-stone-600">Please log in to access the admin panel.</p>
+// Category and venue are typed by the creator (existing ones are suggested)
+const EventPlaceFields: React.FC<{
+  ev: any;
+  setEv: (v: any) => void;
+  categories: any[];
+  venues: any[];
+}> = ({ ev, setEv, categories, venues }) => {
+  const onVenueName = (value: string) => {
+    const match = venues.find((v) => v.name.toLowerCase() === value.trim().toLowerCase());
+    setEv(
+      match
+        ? { ...ev, venueName: value, venueCity: match.city || ev.venueCity, venueAddress: match.address || ev.venueAddress }
+        : { ...ev, venueName: value }
+    );
+  };
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={LABEL_CLS}>Category *</label>
+          <input
+            type="text"
+            required
+            list="category-suggestions"
+            value={ev.categoryName}
+            onChange={(e) => setEv({ ...ev, categoryName: e.target.value })}
+            placeholder="Type a category, e.g. Music"
+            className={FIELD_CLS}
+          />
+          <datalist id="category-suggestions">
+            {categories.map((c) => (
+              <option key={c.id} value={c.name} />
+            ))}
+          </datalist>
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Venue name *</label>
+          <input
+            type="text"
+            required
+            list="venue-suggestions"
+            value={ev.venueName}
+            onChange={(e) => onVenueName(e.target.value)}
+            placeholder="Type a venue name"
+            className={FIELD_CLS}
+          />
+          <datalist id="venue-suggestions">
+            {venues.map((v) => (
+              <option key={v.id} value={v.name} />
+            ))}
+          </datalist>
         </div>
       </div>
-    );
-  }
-
-  // Restrict access based on role
-  if (role === 'customer' || role === 'staff') {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center space-y-4">
-          <AlertCircle className="w-16 h-16 text-rose-500 mx-auto" />
-          <h2 className="text-3xl font-bold text-stone-900">Access Denied</h2>
-          <p className="text-stone-600">You don't have permission to access this page.</p>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={LABEL_CLS}>Venue city *</label>
+          <input
+            type="text"
+            required
+            value={ev.venueCity}
+            onChange={(e) => setEv({ ...ev, venueCity: e.target.value })}
+            placeholder="e.g. Nairobi"
+            className={FIELD_CLS}
+          />
+        </div>
+        <div>
+          <label className={LABEL_CLS}>Venue address</label>
+          <input
+            type="text"
+            value={ev.venueAddress}
+            onChange={(e) => setEv({ ...ev, venueAddress: e.target.value })}
+            placeholder="Street / area (optional)"
+            className={FIELD_CLS}
+          />
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+};
+
+// Downscale in the browser so uploads stay small and fast
+function fileToResizedDataUrl(file: File, maxW = 1600, quality = 0.85): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the file'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('That file is not a valid image'));
+      img.onload = () => {
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('Image processing is not supported'));
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+const PosterField: React.FC<{ value: string; onChange: (url: string) => void; token: string | null }> = ({
+  value,
+  onChange,
+  token,
+}) => {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose an image file');
+      return;
+    }
+    setError('');
+    setUploading(true);
+    try {
+      const dataUrl = await fileToResizedDataUrl(file);
+      const res = await fetch('/api/admin/upload-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ dataUrl }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      onChange(data.url);
+    } catch (err: any) {
+      setError(err.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div>
+      <label className={LABEL_CLS}>Event Poster Image</label>
+      <div className="flex items-start gap-3">
+        {value ? (
+          <img src={value} alt="Poster preview" className="w-24 h-24 rounded-xl object-cover border border-[#DFD3C3] shrink-0" />
+        ) : (
+          <div className="w-24 h-24 rounded-xl border border-dashed border-[#DFD3C3] bg-white flex items-center justify-center text-stone-400 text-center shrink-0 px-1">
+            No image
+          </div>
+        )}
+        <div className="flex-1 space-y-2">
+          <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-[#DFD3C3] bg-[#FAF7F0] text-stone-700 font-semibold cursor-pointer hover:text-stone-950">
+            <input type="file" accept="image/*" onChange={handleFile} className="hidden" disabled={uploading} />
+            {uploading ? 'Uploading…' : 'Upload image'}
+          </label>
+          {value && (
+            <button type="button" onClick={() => onChange('')} className="ml-2 text-rose-700 font-semibold">
+              Remove
+            </button>
+          )}
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="…or paste an image URL"
+            className={FIELD_CLS}
+          />
+          {error && <p className="text-rose-700 font-semibold">{error}</p>}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AdminPanel: React.FC = () => {
+  const { token, user, role } = useAuth();
 
   // Organizers can only access events and bookings
   const allowedTabs = role === 'admin' 
@@ -74,23 +226,61 @@ export const AdminPage: React.FC = () => {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<any>(null);
 
+  const [categoriesList, setCategoriesList] = useState<any[]>([]);
+  const [venuesList, setVenuesList] = useState<any[]>([]);
+
+  const toLocalInput = (d: string | Date) => {
+    const date = new Date(d);
+    if (isNaN(date.getTime())) return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  };
+
+  const buildEmptyEvent = () => {
+    const start = new Date();
+    start.setDate(start.getDate() + 14);
+    start.setHours(19, 0, 0, 0);
+    const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
+    return {
+      title: '',
+      subtitle: '',
+      description: '',
+      categoryName: '',
+      venueName: '',
+      venueCity: '',
+      venueAddress: '',
+      posterUrl: '',
+      startDate: toLocalInput(start),
+      endDate: toLocalInput(end),
+      doorsOpen: '18:00',
+      status: 'published',
+      isFeatured: false,
+      ageRestriction: '',
+      cancellationPolicy: '',
+      ticketTiers: [
+        { name: 'General Admission', description: '', price: '45.00', totalQuantity: '300', minPerOrder: '1', maxPerOrder: '6' },
+      ],
+    };
+  };
+
   // New Event Form
-  const [newEvent, setNewEvent] = useState({
+  const [newEvent, setNewEvent] = useState<any>({
     title: '',
     subtitle: '',
     description: '',
-    categoryId: '1',
-    venueId: '1',
-    posterUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=1200',
-    startDate: '2026-11-20T19:00',
-    endDate: '2026-11-20T23:00',
+    categoryName: '',
+    venueName: '',
+    venueCity: '',
+    venueAddress: '',
+    posterUrl: '',
+    startDate: '',
+    endDate: '',
     doorsOpen: '18:00',
     status: 'published',
-    ageRestriction: '18+ All Access',
-    ticketTiers: [
-      { name: 'General Admission', price: '45.00', totalQuantity: '300', minPerOrder: '1', maxPerOrder: '6' },
-      { name: 'VIP Pass', price: '120.00', totalQuantity: '75', minPerOrder: '1', maxPerOrder: '4' },
-    ],
+    isFeatured: false,
+    ageRestriction: '',
+    cancellationPolicy: '',
+    ticketTiers: [] as any[],
   });
 
   // Bookings management state
@@ -135,12 +325,12 @@ export const AdminPage: React.FC = () => {
   const [notification, setNotification] = useState<string | null>(null);
 
   // Use the actual token from AuthContext - no fallback
-  const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+  const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
   const loadOverview = async () => {
     try {
       setLoadingOverview(true);
-      const res = await fetch('/api/admin/overview', { headers: authHeaders });
+      const res = await fetchWithRetry('/api/admin/overview', { headers: authHeaders });
       if (res.ok) setOverview(await res.json());
     } catch (err) {
       console.error(err);
@@ -151,7 +341,7 @@ export const AdminPage: React.FC = () => {
 
   const loadEvents = async () => {
     try {
-      const res = await fetch('/api/admin/events', { headers: authHeaders });
+      const res = await fetchWithRetry('/api/admin/events', { headers: authHeaders });
       if (res.ok) setEventsList(await res.json());
     } catch (err) {
       console.error(err);
@@ -164,7 +354,7 @@ export const AdminPage: React.FC = () => {
       if (bookingFilterStatus !== 'all') params.append('status', bookingFilterStatus);
       if (bookingSearch.trim()) params.append('q', bookingSearch.trim());
 
-      const res = await fetch(`/api/admin/bookings?${params.toString()}`, { headers: authHeaders });
+      const res = await fetchWithRetry(`/api/admin/bookings?${params.toString()}`, { headers: authHeaders });
       if (res.ok) setBookingsList(await res.json());
     } catch (err) {
       console.error(err);
@@ -173,7 +363,7 @@ export const AdminPage: React.FC = () => {
 
   const loadUsers = async () => {
     try {
-      const res = await fetch('/api/admin/users', { headers: authHeaders });
+      const res = await fetchWithRetry('/api/admin/users', { headers: authHeaders });
       if (res.ok) setUsersList(await res.json());
     } catch (err) {
       console.error(err);
@@ -182,7 +372,7 @@ export const AdminPage: React.FC = () => {
 
   const loadSettings = async () => {
     try {
-      const res = await fetch('/api/admin/settings', { headers: authHeaders });
+      const res = await fetchWithRetry('/api/admin/settings', { headers: authHeaders });
       if (res.ok) setSettings(await res.json());
     } catch (err) {
       console.error(err);
@@ -192,8 +382,8 @@ export const AdminPage: React.FC = () => {
   const loadLogs = async () => {
     try {
       const [auditRes, emailRes] = await Promise.all([
-        fetch('/api/admin/audit-logs', { headers: authHeaders }),
-        fetch('/api/admin/email-logs', { headers: authHeaders }),
+        fetchWithRetry('/api/admin/audit-logs', { headers: authHeaders }),
+        fetchWithRetry('/api/admin/email-logs', { headers: authHeaders }),
       ]);
       if (auditRes.ok) setAuditLogs(await auditRes.json());
       if (emailRes.ok) setEmailLogs(await emailRes.json());
@@ -205,6 +395,18 @@ export const AdminPage: React.FC = () => {
   useEffect(() => {
     loadOverview();
   }, [token, role]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [c, v] = await Promise.all([fetchWithRetry('/api/categories'), fetchWithRetry('/api/venues')]);
+        if (c.ok) setCategoriesList(await c.json());
+        if (v.ok) setVenuesList(await v.json());
+      } catch (err) {
+        console.error(err);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (activeTab === 'events') loadEvents();
@@ -223,7 +425,7 @@ export const AdminPage: React.FC = () => {
   const handleViewOrderDetails = async (bookingId: number) => {
     try {
       setLoadingOrderDetail(true);
-      const res = await fetch(`/api/admin/bookings/${bookingId}`, { headers: authHeaders });
+      const res = await fetchWithRetry(`/api/admin/bookings/${bookingId}`, { headers: authHeaders });
       if (res.ok) {
         const data = await res.json();
         setOrderDetailModal(data);
@@ -308,17 +510,39 @@ export const AdminPage: React.FC = () => {
   };
 
   // Create Event Action
+  const updateTier = (idx: number, key: string, value: string) => {
+    setNewEvent((prev: any) => ({
+      ...prev,
+      ticketTiers: prev.ticketTiers.map((t: any, i: number) => (i === idx ? { ...t, [key]: value } : t)),
+    }));
+  };
+
+  const openCreateModal = () => {
+    setNewEvent(buildEmptyEvent());
+    setCreateModalOpen(true);
+  };
+
   const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      if (new Date(newEvent.endDate) <= new Date(newEvent.startDate)) {
+        alert('End date must be after the start date');
+        return;
+      }
+      if (newEvent.ticketTiers.length === 0) {
+        alert('Add at least one ticket tier');
+        return;
+      }
       const payload = {
         ...newEvent,
-        ticketTiers: newEvent.ticketTiers.map((t) => ({
+        startDate: new Date(newEvent.startDate).toISOString(),
+        endDate: new Date(newEvent.endDate).toISOString(),
+        ticketTiers: newEvent.ticketTiers.map((t: any) => ({
           ...t,
-          price: Math.round(parseFloat(t.price) * 100),
-          totalQuantity: parseInt(t.totalQuantity, 10),
-          minPerOrder: parseInt(t.minPerOrder, 10),
-          maxPerOrder: parseInt(t.maxPerOrder, 10),
+          price: Math.round((parseFloat(t.price) || 0) * 100),
+          totalQuantity: parseInt(t.totalQuantity, 10) || 1,
+          minPerOrder: parseInt(t.minPerOrder, 10) || 1,
+          maxPerOrder: parseInt(t.maxPerOrder, 10) || 6,
         })),
       };
 
@@ -339,6 +563,23 @@ export const AdminPage: React.FC = () => {
       }
     } catch (err: any) {
       alert(err.message);
+    }
+  };
+
+  const handleDeleteEvent = async (ev: any) => {
+    if (!confirm(`Permanently delete "${ev.title}" and its ticket tiers? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/admin/events/${ev.id}`, { method: 'DELETE', headers: authHeaders });
+      if (res.ok) {
+        setEventsList((list) => list.filter((e) => e.id !== ev.id));
+        notify('Event deleted');
+        loadOverview();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Failed to delete event');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete event');
     }
   };
 
@@ -379,14 +620,18 @@ export const AdminPage: React.FC = () => {
       title: event.title,
       subtitle: event.subtitle || '',
       description: event.description,
-      categoryId: event.categoryId?.toString() || '1',
-      venueId: event.venueId?.toString() || '1',
-      posterUrl: event.posterUrl,
-      startDate: event.startDate || '',
-      endDate: event.endDate || '',
+      categoryName: event.categoryName || '',
+      venueName: event.venueName || '',
+      venueCity: event.venueCity || '',
+      venueAddress: event.venueAddress || '',
+      posterUrl: event.posterUrl || '',
+      startDate: event.startDate ? toLocalInput(event.startDate) : '',
+      endDate: event.endDate ? toLocalInput(event.endDate) : '',
       doorsOpen: event.doorsOpen || '',
       status: event.status,
+      isFeatured: Boolean(event.isFeatured),
       ageRestriction: event.ageRestriction || '',
+      cancellationPolicy: event.cancellationPolicy || '',
       ticketTiers: [],
     });
     setEditModalOpen(true);
@@ -398,13 +643,20 @@ export const AdminPage: React.FC = () => {
       const res = await fetch(`/api/admin/events/${editingEvent.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify(newEvent),
+        body: JSON.stringify({
+          ...newEvent,
+          startDate: new Date(newEvent.startDate).toISOString(),
+          endDate: new Date(newEvent.endDate).toISOString(),
+        }),
       });
       if (res.ok) {
         notify('Event updated successfully!');
         setEditModalOpen(false);
         setEditingEvent(null);
         loadEvents();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Failed to update event');
       }
     } catch (err) {
       console.error(err);
@@ -604,31 +856,6 @@ export const AdminPage: React.FC = () => {
           </div>
         )}
       </div>
-
-      {/* Active Persona Elevation Notice if in customer or staff mode */}
-      {role !== 'admin' && (
-        <div className="p-3.5 rounded-2xl bg-[#FBF0DF] border border-[#DECAAC] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[#59340E] shadow-xs">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-amber-200 text-amber-900 flex items-center justify-center shrink-0">
-              <AlertCircle className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="font-bold text-stone-900">
-                Current Persona: <span className="uppercase font-mono text-[#8A5120]">{role}</span>
-              </p>
-              <p className="text-sm text-stone-600">
-                You can manage orders, confirm tickets, or switch fully to the Platform Admin persona.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => switchRole('admin')}
-            className="px-3.5 py-1.5 rounded-xl bg-[#965A28] hover:bg-[#824B1E] text-white text-xs font-semibold shadow-xs self-start sm:self-auto shrink-0"
-          >
-            Switch to Admin Persona
-          </button>
-        </div>
-      )}
 
       {/* Navigation Sub-tabs */}
       <div className="flex flex-wrap gap-2 border-b border-[#EADBCA] pb-3">
@@ -834,7 +1061,7 @@ export const AdminPage: React.FC = () => {
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-sm text-stone-900">Event Catalog ({eventsList.length})</h3>
             <button
-              onClick={() => setCreateModalOpen(true)}
+              onClick={openCreateModal}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#965A28] hover:bg-[#824B1E] text-white text-xs font-semibold shadow-md shadow-[#965A28]/20"
             >
               <Plus className="w-4 h-4" />
@@ -926,6 +1153,14 @@ export const AdminPage: React.FC = () => {
                       Cancel
                     </button>
                   )}
+
+                  <button
+                    onClick={() => handleDeleteEvent(ev)}
+                    className="px-3 py-1.5 rounded-lg border border-rose-300 bg-white text-xs text-rose-700 font-semibold hover:bg-rose-50"
+                    title="Delete event permanently"
+                  >
+                    Delete
+                  </button>
                 </div>
               </div>
             ))}
@@ -1315,121 +1550,109 @@ export const AdminPage: React.FC = () => {
 
       {/* CREATE EVENT MODAL */}
       {createModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-[#FCFAF7] border border-[#E5DAC8] rounded-3xl p-6 max-w-2xl w-full space-y-6 my-8 shadow-2xl text-stone-900">
-            <h3 className="text-lg font-bold text-stone-900">Create New Event</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-stone-900/60 backdrop-blur-sm">
+          <div className="bg-[#FCFAF7] border border-[#E5DAC8] rounded-3xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl text-stone-900">
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-6 py-4 bg-[#FCFAF7] border-b border-[#EADBCA] rounded-t-3xl">
+              <h3 className="text-lg font-bold text-stone-900">Create New Event</h3>
+              <button type="button" aria-label="Close" onClick={() => setCreateModalOpen(false)} className="w-8 h-8 rounded-full text-stone-500 hover:text-stone-900 hover:bg-stone-100 text-xl leading-none">×</button>
+            </div>
 
-            <form onSubmit={handleCreateEvent} className="space-y-4 text-xs">
+            <form onSubmit={handleCreateEvent} className="p-6 space-y-4 text-xs">
               <div>
                 <label className="text-stone-600 font-semibold block mb-1">Event Title *</label>
-                <input
-                  type="text"
-                  required
-                  value={newEvent.title}
-                  onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })}
-                  placeholder="e.g. Electric Forest Live 2026"
-                  className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]"
-                />
+                <input type="text" value={newEvent.title} onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })} required placeholder="e.g. Electric Forest Live 2026" className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]" />
               </div>
-
               <div>
                 <label className="text-stone-600 font-semibold block mb-1">Subtitle / Tagline</label>
-                <input
-                  type="text"
-                  value={newEvent.subtitle}
-                  onChange={(e) => setNewEvent({ ...newEvent, subtitle: e.target.value })}
-                  placeholder="A cinematic 3-day showcase of world synthpop"
-                  className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]"
-                />
+                <input type="text" value={newEvent.subtitle} onChange={(e) => setNewEvent({ ...newEvent, subtitle: e.target.value })}  className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]" />
               </div>
-
               <div>
                 <label className="text-stone-600 font-semibold block mb-1">Description *</label>
-                <textarea
-                  rows={3}
-                  required
-                  value={newEvent.description}
-                  onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
-                  className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]"
-                />
+                <textarea rows={3} required value={newEvent.description} onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })} className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]" />
+              </div>
+
+              <EventPlaceFields ev={newEvent} setEv={setNewEvent} categories={categoriesList} venues={venuesList} />
+
+              <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-stone-600 font-semibold block mb-1">Start Date & Time *</label>
+                <input type="datetime-local" value={newEvent.startDate} onChange={(e) => setNewEvent({ ...newEvent, startDate: e.target.value })} required className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]" />
+              </div>
+              <div>
+                <label className="text-stone-600 font-semibold block mb-1">End Date & Time *</label>
+                <input type="datetime-local" value={newEvent.endDate} onChange={(e) => setNewEvent({ ...newEvent, endDate: e.target.value })} required className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]" />
+              </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-stone-600 font-semibold block mb-1">Start Date & Time *</label>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={newEvent.startDate}
-                    onChange={(e) => setNewEvent({ ...newEvent, startDate: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]"
-                  />
-                </div>
-                <div>
-                  <label className="text-stone-600 font-semibold block mb-1">End Date & Time *</label>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={newEvent.endDate}
-                    onChange={(e) => setNewEvent({ ...newEvent, endDate: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]"
-                  />
-                </div>
+              <div>
+                <label className="text-stone-600 font-semibold block mb-1">Doors Open</label>
+                <input type="time" value={newEvent.doorsOpen} onChange={(e) => setNewEvent({ ...newEvent, doorsOpen: e.target.value })}  className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]" />
+              </div>
+              <div>
+                <label className="text-stone-600 font-semibold block mb-1">Status</label>
+                <select  value={newEvent.status} onChange={(e) => setNewEvent({ ...newEvent, status: e.target.value })} className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]"><option value="published">Published</option><option value="draft">Draft</option><option value="unlisted">Unlisted</option></select>
+              </div>
               </div>
 
+              <PosterField value={newEvent.posterUrl} onChange={(url) => setNewEvent({ ...newEvent, posterUrl: url })} token={token} />
               <div>
-                <label className="text-stone-600 font-semibold block mb-1">Poster Image URL</label>
-                <input
-                  type="url"
-                  value={newEvent.posterUrl}
-                  onChange={(e) => setNewEvent({ ...newEvent, posterUrl: e.target.value })}
-                  className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]"
-                />
+                <label className="text-stone-600 font-semibold block mb-1">Age Restriction</label>
+                <input type="text" value={newEvent.ageRestriction} onChange={(e) => setNewEvent({ ...newEvent, ageRestriction: e.target.value })} placeholder="e.g. 18+, 21+, All Ages" className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]" />
               </div>
+              <div>
+                <label className="text-stone-600 font-semibold block mb-1">Cancellation / Refund Policy</label>
+                <textarea rows={2} value={newEvent.cancellationPolicy} onChange={(e) => setNewEvent({ ...newEvent, cancellationPolicy: e.target.value })} className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]" />
+              </div>
+
+              <label className="flex items-center gap-2 text-stone-700 font-semibold">
+                <input type="checkbox" checked={newEvent.isFeatured} onChange={(e) => setNewEvent({ ...newEvent, isFeatured: e.target.checked })} />
+                Feature this event on the home page
+              </label>
 
               {/* Ticket Tiers Setup */}
               <div className="pt-2 border-t border-[#EADBCA] space-y-3">
-                <h4 className="font-bold text-stone-900 uppercase text-xs font-mono">Admission Ticket Tiers</h4>
-                {newEvent.ticketTiers.map((t, idx) => (
-                  <div key={idx} className="p-3 bg-white border border-[#DFD3C3] rounded-xl grid grid-cols-3 gap-2">
-                    <input
-                      type="text"
-                      placeholder="Tier Name (e.g. VIP)"
-                      value={t.name}
-                      onChange={(e) => {
-                        const copy = [...newEvent.ticketTiers];
-                        copy[idx].name = e.target.value;
-                        setNewEvent({ ...newEvent, ticketTiers: copy });
-                      }}
-                      className="px-2 py-1.5 bg-[#FAF7F0] border border-[#E5DAC8] rounded-lg text-stone-900 text-xs"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Price ($USD, e.g. 45.00)"
-                      value={t.price}
-                      onChange={(e) => {
-                        const copy = [...newEvent.ticketTiers];
-                        copy[idx].price = e.target.value;
-                        setNewEvent({ ...newEvent, ticketTiers: copy });
-                      }}
-                      className="px-2 py-1.5 bg-[#FAF7F0] border border-[#E5DAC8] rounded-lg text-stone-900 text-xs font-mono"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Capacity (e.g. 200)"
-                      value={t.totalQuantity}
-                      onChange={(e) => {
-                        const copy = [...newEvent.ticketTiers];
-                        copy[idx].totalQuantity = e.target.value;
-                        setNewEvent({ ...newEvent, ticketTiers: copy });
-                      }}
-                      className="px-2 py-1.5 bg-[#FAF7F0] border border-[#E5DAC8] rounded-lg text-stone-900 text-xs font-mono"
-                    />
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-stone-900 uppercase text-xs font-mono">Admission Ticket Tiers *</h4>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setNewEvent({
+                        ...newEvent,
+                        ticketTiers: [...newEvent.ticketTiers, { name: '', description: '', price: '0', totalQuantity: '100', minPerOrder: '1', maxPerOrder: '6' }],
+                      })
+                    }
+                    className="px-3 py-1 rounded-lg border border-[#DFD3C3] bg-[#FAF7F0] text-stone-700 font-semibold hover:text-stone-950"
+                  >
+                    + Add Tier
+                  </button>
+                </div>
+                {newEvent.ticketTiers.map((t: any, idx: number) => (
+                  <div key={idx} className="p-3 bg-white border border-[#DFD3C3] rounded-xl space-y-2">
+                    <div className="grid grid-cols-3 gap-2">
+                      <input required type="text" placeholder="Tier name (e.g. VIP)" value={t.name} onChange={(e) => updateTier(idx, 'name', e.target.value)} className="px-2 py-1.5 bg-[#FAF7F0] border border-[#E5DAC8] rounded-lg text-stone-900 text-xs " />
+                      <input min="0" step="0.01" type="number" placeholder="Price in USD (e.g. 45.00)" value={t.price} onChange={(e) => updateTier(idx, 'price', e.target.value)} className="px-2 py-1.5 bg-[#FAF7F0] border border-[#E5DAC8] rounded-lg text-stone-900 text-xs font-mono" />
+                      <input required min="1" type="number" placeholder="Capacity (e.g. 200)" value={t.totalQuantity} onChange={(e) => updateTier(idx, 'totalQuantity', e.target.value)} className="px-2 py-1.5 bg-[#FAF7F0] border border-[#E5DAC8] rounded-lg text-stone-900 text-xs font-mono" />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <input  type="text" placeholder="Description (optional)" value={t.description} onChange={(e) => updateTier(idx, 'description', e.target.value)} className="px-2 py-1.5 bg-[#FAF7F0] border border-[#E5DAC8] rounded-lg text-stone-900 text-xs " />
+                      <input min="1" type="number" placeholder="Min per order" value={t.minPerOrder} onChange={(e) => updateTier(idx, 'minPerOrder', e.target.value)} className="px-2 py-1.5 bg-[#FAF7F0] border border-[#E5DAC8] rounded-lg text-stone-900 text-xs font-mono" />
+                      <input min="1" type="number" placeholder="Max per order" value={t.maxPerOrder} onChange={(e) => updateTier(idx, 'maxPerOrder', e.target.value)} className="px-2 py-1.5 bg-[#FAF7F0] border border-[#E5DAC8] rounded-lg text-stone-900 text-xs font-mono" />
+                    </div>
+                    {newEvent.ticketTiers.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setNewEvent({ ...newEvent, ticketTiers: newEvent.ticketTiers.filter((_: any, i: number) => i !== idx) })}
+                        className="text-rose-700 font-semibold"
+                      >
+                        Remove tier
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
 
-              <div className="flex justify-end gap-2 pt-4">
+              <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-3 mt-2 flex justify-end gap-2 bg-[#FCFAF7] border-t border-[#EADBCA] rounded-b-3xl">
                 <button
                   type="button"
                   onClick={() => setCreateModalOpen(false)}
@@ -1451,11 +1674,14 @@ export const AdminPage: React.FC = () => {
 
       {/* EDIT EVENT MODAL */}
       {editModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-[#FCFAF7] border border-[#E5DAC8] rounded-3xl p-6 max-w-2xl w-full space-y-6 my-8 shadow-2xl text-stone-900">
-            <h3 className="text-lg font-bold text-stone-900">Edit Event</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-stone-900/60 backdrop-blur-sm">
+          <div className="bg-[#FCFAF7] border border-[#E5DAC8] rounded-3xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl text-stone-900">
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-6 py-4 bg-[#FCFAF7] border-b border-[#EADBCA] rounded-t-3xl">
+              <h3 className="text-lg font-bold text-stone-900">Edit Event</h3>
+              <button type="button" aria-label="Close" onClick={() => { setEditModalOpen(false); setEditingEvent(null); }} className="w-8 h-8 rounded-full text-stone-500 hover:text-stone-900 hover:bg-stone-100 text-xl leading-none">×</button>
+            </div>
 
-            <form onSubmit={handleUpdateEvent} className="space-y-4 text-xs">
+            <form onSubmit={handleUpdateEvent} className="p-6 space-y-4 text-xs">
               <div>
                 <label className="text-stone-600 font-semibold block mb-1">Event Title *</label>
                 <input
@@ -1488,47 +1714,9 @@ export const AdminPage: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-stone-600 font-semibold block mb-1">Category</label>
-                  <select
-                    value={newEvent.categoryId}
-                    onChange={(e) => setNewEvent({ ...newEvent, categoryId: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]"
-                  >
-                    <option value="1">Music</option>
-                    <option value="2">Sports</option>
-                    <option value="3">Theater</option>
-                    <option value="4">Comedy</option>
-                    <option value="5">Arts</option>
-                    <option value="6">Technology</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-stone-600 font-semibold block mb-1">Venue</label>
-                  <select
-                    value={newEvent.venueId}
-                    onChange={(e) => setNewEvent({ ...newEvent, venueId: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]"
-                  >
-                    <option value="1">Madison Square Garden</option>
-                    <option value="2">Hollywood Bowl</option>
-                    <option value="3">Red Rocks Amphitheatre</option>
-                    <option value="4">Royal Albert Hall</option>
-                    <option value="5">Sydney Opera House</option>
-                  </select>
-                </div>
-              </div>
+              <EventPlaceFields ev={newEvent} setEv={setNewEvent} categories={categoriesList} venues={venuesList} />
 
-              <div>
-                <label className="text-stone-600 font-semibold block mb-1">Poster URL</label>
-                <input
-                  type="url"
-                  value={newEvent.posterUrl}
-                  onChange={(e) => setNewEvent({ ...newEvent, posterUrl: e.target.value })}
-                  className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]"
-                />
-              </div>
+              <PosterField value={newEvent.posterUrl} onChange={(url) => setNewEvent({ ...newEvent, posterUrl: url })} token={token} />
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1589,7 +1777,26 @@ export const AdminPage: React.FC = () => {
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-4">
+              <div>
+                <label className="text-stone-600 font-semibold block mb-1">Cancellation / Refund Policy</label>
+                <textarea
+                  rows={2}
+                  value={newEvent.cancellationPolicy}
+                  onChange={(e) => setNewEvent({ ...newEvent, cancellationPolicy: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-[#DFD3C3] rounded-xl text-stone-900 focus:outline-none focus:border-[#965A28]"
+                />
+              </div>
+
+              <label className="flex items-center gap-2 text-stone-700 font-semibold">
+                <input
+                  type="checkbox"
+                  checked={newEvent.isFeatured}
+                  onChange={(e) => setNewEvent({ ...newEvent, isFeatured: e.target.checked })}
+                />
+                Feature this event on the home page
+              </label>
+
+              <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-3 mt-2 flex justify-end gap-2 bg-[#FCFAF7] border-t border-[#EADBCA] rounded-b-3xl">
                 <button
                   type="button"
                   onClick={() => {
@@ -2120,4 +2327,35 @@ export const AdminPage: React.FC = () => {
       )}
     </div>
   );
+};
+
+// Guards live in a wrapper so AdminPanel's hooks always run in the same order
+export const AdminPage: React.FC = () => {
+  const { token, user, role } = useAuth();
+
+  if (!token || !user) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <AlertCircle className="w-16 h-16 text-amber-500 mx-auto" />
+          <h2 className="text-3xl font-bold text-stone-900">Authentication Required</h2>
+          <p className="text-stone-600">Please log in to access the admin panel.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (role === 'customer' || role === 'staff') {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <AlertCircle className="w-16 h-16 text-rose-500 mx-auto" />
+          <h2 className="text-3xl font-bold text-stone-900">Access Denied</h2>
+          <p className="text-stone-600">You don't have permission to access this page.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <AdminPanel />;
 };

@@ -337,3 +337,11 @@ export const checkInsRelations = relations(checkIns, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+// Uploaded images (event posters), stored in Postgres so they survive redeploys
+export const uploadedImages = pgTable('uploaded_images', {
+  id: serial('id').primaryKey(),
+  mimeType: text('mime_type').notNull(),
+  data: text('data').notNull(), // base64
+  createdAt: timestamp('created_at').defaultNow(),
+});

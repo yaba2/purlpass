@@ -59,13 +59,25 @@ export async function getOrCreateUser(
   }
 }
 
+// Short-lived cache so each API request doesn't pay a DB round trip for auth
+const USER_CACHE_TTL_MS = 30_000;
+const userCache = new Map<string, { at: number; user: UserProfile | null }>();
+
+export function invalidateUserCache() {
+  userCache.clear();
+}
+
 export async function getUserByUid(uid: string): Promise<UserProfile | null> {
   try {
+    const hit = userCache.get(uid);
+    if (hit && Date.now() - hit.at < USER_CACHE_TTL_MS) return hit.user;
     const result = await db.select().from(users).where(eq(users.uid, uid)).limit(1);
-    return (result[0] as UserProfile) || null;
+    const user = (result[0] as UserProfile) || null;
+    if (user) userCache.set(uid, { at: Date.now(), user });
+    return user;
   } catch (error) {
     console.error('getUserByUid error:', error);
-    return null;
+    throw error;
   }
 }
 

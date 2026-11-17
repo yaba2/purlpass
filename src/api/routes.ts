@@ -13,8 +13,9 @@ import {
   platformSettings,
   auditLogs,
   users,
+  uploadedImages,
 } from '../db/schema.ts';
-import { eq, desc, asc, and, or, sql, like } from 'drizzle-orm';
+import { eq, desc, asc, and, or, sql, like, inArray } from 'drizzle-orm';
 import { requireAuth, requireRole, optionalAuth, AuthRequest } from '../middleware/auth.ts';
 import {
   createBookingReservation,
@@ -25,7 +26,7 @@ import {
 } from '../services/tickets.ts';
 import { getPaymentProvider } from '../services/payment.ts';
 import { getEmailLogs, sendBookingConfirmationEmail } from '../services/email.ts';
-import { getAllUsers, updateUserRole, toggleUserActive } from '../db/users.ts';
+import { getAllUsers, updateUserRole, toggleUserActive, invalidateUserCache } from '../db/users.ts';
 import bcrypt from 'bcrypt';
 
 export const apiRouter = Router();
@@ -34,10 +35,116 @@ export const apiRouter = Router();
 // 1. PUBLIC PLATFORM & DISCOVERY ROUTES
 // ==========================================
 
+// ---- Small in-memory cache for public read endpoints (cleared on any admin write) ----
+const publicCache = new Map<string, { at: number; data: any }>();
+const PUBLIC_TTL_MS = 30_000;
+async function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const hit = publicCache.get(key);
+  if (hit && Date.now() - hit.at < PUBLIC_TTL_MS) return hit.data as T;
+  const data = await load();
+  publicCache.set(key, { at: Date.now(), data });
+  return data;
+}
+apiRouter.use((req, res, next) => {
+  if (req.method !== 'GET') res.on('finish', () => { publicCache.clear(); invalidateUserCache(); });
+  next();
+});
+
+const slugify = (v: string) =>
+  v.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'general';
+
+// Category / venue are typed by the creator: reuse an existing one (case-insensitive) or create it
+async function resolveCategoryAndVenue(body: any): Promise<{ categoryId?: number | null; venueId?: number | null }> {
+  const out: { categoryId?: number | null; venueId?: number | null } = {};
+
+  const catName = typeof body.categoryName === 'string' ? body.categoryName.trim() : '';
+  if (catName) {
+    const slug = slugify(catName);
+    const found = await db.select().from(eventCategories).where(eq(eventCategories.slug, slug)).limit(1);
+    if (found.length > 0) out.categoryId = found[0].id;
+    else {
+      const created = await db.insert(eventCategories).values({ slug, name: catName }).returning();
+      out.categoryId = created[0].id;
+    }
+  } else if (body.categoryId) {
+    out.categoryId = Number(body.categoryId);
+  }
+
+  const venueName = typeof body.venueName === 'string' ? body.venueName.trim() : '';
+  if (venueName) {
+    const city = (typeof body.venueCity === 'string' ? body.venueCity.trim() : '') || 'Unknown';
+    const address = (typeof body.venueAddress === 'string' ? body.venueAddress.trim() : '') || city;
+    const found = await db
+      .select()
+      .from(venues)
+      .where(and(sql`lower(${venues.name}) = ${venueName.toLowerCase()}`, sql`lower(${venues.city}) = ${city.toLowerCase()}`))
+      .limit(1);
+    if (found.length > 0) out.venueId = found[0].id;
+    else {
+      const created = await db.insert(venues).values({ name: venueName, city, address }).returning();
+      out.venueId = created[0].id;
+    }
+  } else if (body.venueId) {
+    out.venueId = Number(body.venueId);
+  }
+  return out;
+}
+
+// ---- Image uploads (stored in Postgres, served at /api/images/:id) ----
+let imagesTableReady: Promise<unknown> | null = null;
+function ensureImagesTable() {
+  if (!imagesTableReady) {
+    imagesTableReady = db
+      .execute(sql`CREATE TABLE IF NOT EXISTS uploaded_images (
+        id SERIAL PRIMARY KEY,
+        mime_type TEXT NOT NULL,
+        data TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )`)
+      .catch((err) => {
+        imagesTableReady = null;
+        throw err;
+      });
+  }
+  return imagesTableReady;
+}
+
+apiRouter.post('/admin/upload-image', requireAuth, requireRole(['organizer', 'admin']), async (req: AuthRequest, res: Response) => {
+  try {
+    const dataUrl = req.body?.dataUrl;
+    const m = typeof dataUrl === 'string' ? dataUrl.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/) : null;
+    if (!m) return res.status(400).json({ error: 'Upload a PNG, JPEG, WebP or GIF image' });
+    if (m[2].length > 7_000_000) return res.status(413).json({ error: 'Image is too large (max about 5 MB)' });
+
+    await ensureImagesTable();
+    const inserted = await db.insert(uploadedImages).values({ mimeType: m[1], data: m[2] }).returning({ id: uploadedImages.id });
+    res.status(201).json({ url: `/api/images/${inserted[0].id}` });
+  } catch (error: any) {
+    console.error('Image upload failed:', error);
+    res.status(500).json({ error: 'Failed to upload image' });
+  }
+});
+
+apiRouter.get('/images/:id', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).end();
+    await ensureImagesTable();
+    const rows = await db.select().from(uploadedImages).where(eq(uploadedImages.id, id)).limit(1);
+    if (rows.length === 0) return res.status(404).end();
+    res.setHeader('Content-Type', rows[0].mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(Buffer.from(rows[0].data, 'base64'));
+  } catch (error: any) {
+    console.error('Image fetch failed:', error);
+    res.status(500).end();
+  }
+});
+
 // Public platform settings
 apiRouter.get('/settings/public', async (_req: Request, res: Response) => {
   try {
-    const settings = await db.select().from(platformSettings).limit(1);
+    const settings = await cached('settings', () => db.select().from(platformSettings).limit(1));
     const item = settings[0] || {
       platformName: 'PulsePass',
       contactEmail: 'support@pulsepass.events',
@@ -56,7 +163,7 @@ apiRouter.get('/settings/public', async (_req: Request, res: Response) => {
 // Categories with event counts
 apiRouter.get('/categories', async (_req: Request, res: Response) => {
   try {
-    const cats = await db.select().from(eventCategories).orderBy(asc(eventCategories.name));
+    const cats = await cached('categories', () => db.select().from(eventCategories).orderBy(asc(eventCategories.name)));
     res.json(cats);
   } catch (error: any) {
     console.error('Failed to fetch categories:', error);
@@ -67,7 +174,7 @@ apiRouter.get('/categories', async (_req: Request, res: Response) => {
 // Venues list
 apiRouter.get('/venues', async (_req: Request, res: Response) => {
   try {
-    const allVenues = await db.select().from(venues).orderBy(asc(venues.name));
+    const allVenues = await cached('venues', () => db.select().from(venues).orderBy(asc(venues.name)));
     res.json(allVenues);
   } catch (error: any) {
     console.error('Failed to fetch venues:', error);
@@ -178,6 +285,16 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
 // List and search published events
 apiRouter.get('/events', async (req: Request, res: Response) => {
   try {
+    const payload = await cached(`events:${req.originalUrl}`, () => loadEventsList(req));
+    res.json(payload);
+  } catch (error: any) {
+    console.error('Failed to fetch events:', error);
+    res.status(500).json({ error: 'Failed to search events' });
+  }
+});
+
+async function loadEventsList(req: Request) {
+  {
     const { q, category, city, sort, limit = '20', page = '1' } = req.query;
     const pageNum = Math.max(1, parseInt(page as string, 10) || 1);
     const limitNum = Math.min(50, Math.max(1, parseInt(limit as string, 10) || 20));
@@ -237,16 +354,13 @@ apiRouter.get('/events', async (req: Request, res: Response) => {
       .offset(offset);
 
     const eventList = await query;
-    res.json({
+    return {
       events: eventList,
       page: pageNum,
       limit: limitNum,
-    });
-  } catch (error: any) {
-    console.error('Failed to fetch events:', error);
-    res.status(500).json({ error: 'Failed to search events' });
+    };
   }
-});
+}
 
 // Single event details by slug
 apiRouter.get('/events/:slug', async (req: Request, res: Response) => {
@@ -781,32 +895,36 @@ apiRouter.get('/check-in/event/:eventId/history', requireAuth, requireRole(['sta
 // Overview metrics & real analytics
 apiRouter.get('/admin/overview', requireAuth, requireRole(['organizer', 'admin']), async (_req: AuthRequest, res: Response) => {
   try {
-    const totalEventsRes = await db.select({ count: sql<number>`count(*)` }).from(events);
-    const upcomingEventsRes = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(events)
-      .where(and(eq(events.status, 'published'), sql`${events.startDate} >= NOW()`));
-
-    const totalBookingsRes = await db
-      .select({
-        count: sql<number>`count(*)`,
-        revenue: sql<number>`COALESCE(sum(total_amount), 0)`,
-      })
-      .from(bookings)
-      .where(eq(bookings.status, 'confirmed'));
-
-    const ticketsSoldRes = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(tickets)
-      .where(or(eq(tickets.status, 'valid'), eq(tickets.status, 'checked_in')));
-
-    const totalCheckedInRes = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(tickets)
-      .where(eq(tickets.status, 'checked_in'));
-
-    // Recent bookings table
-    const recentBookings = await db
+    // Run all independent queries in parallel (each is a network round trip)
+    const [
+      totalEventsRes,
+      upcomingEventsRes,
+      totalBookingsRes,
+      ticketsSoldRes,
+      totalCheckedInRes,
+      recentBookings,
+    ] = await Promise.all([
+      db.select({ count: sql<number>`count(*)` }).from(events),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(events)
+        .where(and(eq(events.status, 'published'), sql`${events.startDate} >= NOW()`)),
+      db
+        .select({
+          count: sql<number>`count(*)`,
+          revenue: sql<number>`COALESCE(sum(total_amount), 0)`,
+        })
+        .from(bookings)
+        .where(eq(bookings.status, 'confirmed')),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(tickets)
+        .where(or(eq(tickets.status, 'valid'), eq(tickets.status, 'checked_in'))),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(tickets)
+        .where(eq(tickets.status, 'checked_in')),
+      db
       .select({
         id: bookings.id,
         bookingReference: bookings.bookingReference,
@@ -821,7 +939,8 @@ apiRouter.get('/admin/overview', requireAuth, requireRole(['organizer', 'admin']
       .from(bookings)
       .innerJoin(events, eq(bookings.eventId, events.id))
       .orderBy(desc(bookings.createdAt))
-      .limit(8);
+      .limit(8),
+    ]);
 
     res.json({
       totalEvents: Number(totalEventsRes[0]?.count || 0),
@@ -851,6 +970,11 @@ apiRouter.get('/admin/events', requireAuth, requireRole(['organizer', 'admin']),
         slug: events.slug,
         title: events.title,
         subtitle: events.subtitle,
+        description: events.description,
+        categoryId: events.categoryId,
+        venueId: events.venueId,
+        ageRestriction: events.ageRestriction,
+        cancellationPolicy: events.cancellationPolicy,
         startDate: events.startDate,
         endDate: events.endDate,
         doorsOpen: events.doorsOpen,
@@ -861,15 +985,22 @@ apiRouter.get('/admin/events', requireAuth, requireRole(['organizer', 'admin']),
         posterUrl: events.posterUrl,
         categoryName: eventCategories.name,
         venueName: venues.name,
+        venueCity: venues.city,
+        venueAddress: venues.address,
       })
       .from(events)
       .leftJoin(eventCategories, eq(events.categoryId, eventCategories.id))
       .leftJoin(venues, eq(events.venueId, venues.id))
       .orderBy(desc(events.startDate));
 
+    // One query for all tiers instead of one per event
+    const allTiers = allEvents.length
+      ? await db.select().from(ticketTypes).where(inArray(ticketTypes.eventId, allEvents.map((e) => e.id)))
+      : [];
+
     const eventsWithStats = await Promise.all(
       allEvents.map(async (ev) => {
-        const tiers = await db.select().from(ticketTypes).where(eq(ticketTypes.eventId, ev.id));
+        const tiers = allTiers.filter((t) => t.eventId === ev.id);
         const totalCapacity = tiers.reduce((acc, t) => acc + t.totalQuantity, 0);
         const totalSold = tiers.reduce((acc, t) => acc + t.soldQuantity, 0);
 
@@ -913,6 +1044,7 @@ apiRouter.post('/admin/events', requireAuth, requireRole(['organizer', 'admin'])
     if (!title || !description || !startDate || !endDate) {
       return res.status(400).json({ error: 'Missing required event fields (title, description, dates)' });
     }
+    const resolved = await resolveCategoryAndVenue(req.body);
 
     // Slug generator
     const baseSlug = title
@@ -932,8 +1064,8 @@ apiRouter.post('/admin/events', requireAuth, requireRole(['organizer', 'admin'])
         title,
         subtitle,
         description,
-        categoryId: categoryId ? Number(categoryId) : null,
-        venueId: venueId ? Number(venueId) : null,
+        categoryId: resolved.categoryId ?? null,
+        venueId: resolved.venueId ?? null,
         organizerId: req.user!.id,
         posterUrl: posterUrl || 'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?w=1200',
         startDate: new Date(startDate),
@@ -1028,7 +1160,11 @@ apiRouter.put('/admin/events/:id', requireAuth, requireRole(['organizer', 'admin
       doorsOpen,
       status,
       ageRestriction,
+      cancellationPolicy,
+      isFeatured,
     } = req.body;
+
+    const resolved = await resolveCategoryAndVenue(req.body);
 
     const updated = await db
       .update(events)
@@ -1036,18 +1172,22 @@ apiRouter.put('/admin/events/:id', requireAuth, requireRole(['organizer', 'admin
         title,
         subtitle,
         description,
-        categoryId: categoryId ? Number(categoryId) : undefined,
-        venueId: venueId ? Number(venueId) : undefined,
+        categoryId: resolved.categoryId ?? undefined,
+        venueId: resolved.venueId ?? undefined,
         posterUrl,
         startDate: new Date(startDate),
         endDate: new Date(endDate),
         doorsOpen,
         status,
         ageRestriction,
+        cancellationPolicy,
+        ...(isFeatured !== undefined ? { isFeatured: Boolean(isFeatured) } : {}),
         updatedAt: new Date(),
       })
       .where(eq(events.id, id))
       .returning();
+
+    if (updated.length === 0) return res.status(404).json({ error: 'Event not found' });
 
     await db.insert(auditLogs).values({
       userId: req.user!.id,
@@ -1061,6 +1201,44 @@ apiRouter.put('/admin/events/:id', requireAuth, requireRole(['organizer', 'admin
   } catch (error: any) {
     console.error('Failed to update event:', error);
     res.status(500).json({ error: error.message || 'Failed to update event' });
+  }
+});
+
+// Delete event (only when it has no bookings)
+apiRouter.delete('/admin/events/:id', requireAuth, requireRole(['organizer', 'admin']), async (req: AuthRequest, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid event id' });
+
+    const existing = await db.select().from(events).where(eq(events.id, id)).limit(1);
+    if (existing.length === 0) return res.status(404).json({ error: 'Event not found' });
+
+    const bookingCount = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(bookings)
+      .where(eq(bookings.eventId, id));
+    if (Number(bookingCount[0]?.count || 0) > 0) {
+      return res.status(409).json({
+        error: 'This event has bookings and cannot be deleted. Cancel or unpublish it instead.',
+      });
+    }
+
+    await db.delete(checkIns).where(eq(checkIns.eventId, id));
+    await db.delete(ticketTypes).where(eq(ticketTypes.eventId, id));
+    await db.delete(events).where(eq(events.id, id));
+
+    await db.insert(auditLogs).values({
+      userId: req.user!.id,
+      action: 'EVENT_DELETED',
+      entityType: 'EVENT',
+      entityId: id.toString(),
+      details: `Deleted event "${existing[0].title}"`,
+    });
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Failed to delete event:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete event' });
   }
 });
 
@@ -1162,16 +1340,24 @@ apiRouter.get('/admin/bookings', requireAuth, requireRole(['organizer', 'admin']
       .limit(100);
 
     // Attach ticket counts
-    const withTickets = await Promise.all(
-      rows.map(async (b) => {
-        const ticketRows = await db.select().from(tickets).where(eq(tickets.bookingId, b.id));
-        return {
-          ...b,
-          ticketCount: ticketRows.length,
-          checkedInCount: ticketRows.filter((t) => t.status === 'checked_in').length,
-        };
-      })
-    );
+    // One grouped query instead of one query per booking
+    const counts = rows.length
+      ? await db
+          .select({
+            bookingId: tickets.bookingId,
+            total: sql<number>`count(*)`,
+            checkedIn: sql<number>`count(*) filter (where ${tickets.status} = 'checked_in')`,
+          })
+          .from(tickets)
+          .where(inArray(tickets.bookingId, rows.map((r) => r.id)))
+          .groupBy(tickets.bookingId)
+      : [];
+    const countMap = new Map(counts.map((c) => [c.bookingId, c]));
+    const withTickets = rows.map((b) => ({
+      ...b,
+      ticketCount: Number(countMap.get(b.id)?.total || 0),
+      checkedInCount: Number(countMap.get(b.id)?.checkedIn || 0),
+    }));
 
     res.json(withTickets);
   } catch (error: any) {

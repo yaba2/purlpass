@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { AuthProvider } from './context/AuthContext.tsx';
+import React, { useState, useEffect, useRef } from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext.tsx';
 import { Navbar } from './components/Navbar.tsx';
 import { Footer } from './components/Footer.tsx';
 import { HomePage } from './pages/HomePage.tsx';
@@ -63,6 +63,16 @@ function MainApp() {
     const url = tab === 'home' ? '/' : `/?tab=${tab}`;
     window.history.pushState({}, '', url);
   };
+
+  // When the user logs out, leave pages that need a login and go home
+  const { user } = useAuth();
+  const prevUser = useRef(user);
+  useEffect(() => {
+    if (prevUser.current && !user && ['admin', 'my-tickets', 'check-in'].includes(currentTab)) {
+      navigateToTab('home');
+    }
+    prevUser.current = user;
+  }, [user]);
 
   const handleSelectEvent = (slug: string) => {
     setSelectedEventSlug(slug);

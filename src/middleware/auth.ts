@@ -41,7 +41,7 @@ export const requireAuth = async (
     next();
   } catch (error) {
     console.error('Error verifying token:', error);
-    return res.status(401).json({ error: 'Unauthorized: Token is invalid or expired' });
+    return res.status(503).json({ error: 'Database temporarily unavailable. Please try again.' });
   }
 };
 

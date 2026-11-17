@@ -14,6 +14,7 @@ import {
   QrCode,
 } from 'lucide-react';
 import { EventCard, EventItem } from '../components/EventCard.tsx';
+import { fetchWithRetry } from '../lib/api.ts';
 
 interface HomePageProps {
   onSelectEvent: (slug: string) => void;
@@ -26,16 +27,26 @@ export const HomePage: React.FC<HomePageProps> = ({
   onExploreAll,
   onQuickBook,
 }) => {
-  const [events, setEvents] = useState<EventItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Show the last-seen events instantly, then refresh in the background
+  const readCache = (): EventItem[] => {
+    try {
+      return JSON.parse(localStorage.getItem('pp_home_events') || '[]');
+    } catch {
+      return [];
+    }
+  };
+  const [events, setEvents] = useState<EventItem[]>(readCache);
+  const [loading, setLoading] = useState(() => readCache().length === 0);
 
   useEffect(() => {
     async function loadData() {
       try {
-        setLoading(true);
-        const evRes = await fetch('/api/events?limit=12');
+        const evRes = await fetchWithRetry('/api/events?limit=12');
         const evData = await evRes.json();
         setEvents(evData.events || []);
+        try {
+          localStorage.setItem('pp_home_events', JSON.stringify(evData.events || []));
+        } catch {}
       } catch (err) {
         console.error('Failed to load homepage data:', err);
       } finally {
